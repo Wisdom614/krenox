@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { Button, Logo } from "@/components/ui";
 import {
   ApiService,
@@ -30,7 +31,6 @@ export default function StaffPage() {
     });
   }, []);
 
-  // Poll queue state every 3.5 seconds
   const refreshQueue = useCallback(async () => {
     if (!selectedServiceId) return;
     try {
@@ -43,10 +43,29 @@ export default function StaffPage() {
   }, [selectedServiceId]);
 
   useEffect(() => {
-    refreshQueue();
-    const interval = setInterval(refreshQueue, 3500);
-    return () => clearInterval(interval);
-  }, [refreshQueue]);
+    let active = true;
+    if (selectedServiceId) {
+      fetchStaffQueue(selectedServiceId)
+        .then((data) => {
+          if (active) setQueueState(data);
+        })
+        .catch(() => {});
+    }
+    const interval = setInterval(() => {
+      if (selectedServiceId && active) {
+        fetchStaffQueue(selectedServiceId)
+          .then((data) => {
+            if (active) setQueueState(data);
+          })
+          .catch(() => {});
+      }
+    }, 3500);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [selectedServiceId]);
 
   async function handleCallNext() {
     if (!selectedServiceId) return;
@@ -111,12 +130,12 @@ export default function StaffPage() {
                 <option value="Counter A">Counter A</option>
               </select>
             </div>
-            <a
+            <Link
               href="/"
-              className="text-xs font-semibold text-soft hover:text-ink underline underline-offset-4"
+              className="text-xs font-semibold text-soft hover:text-ink transition underline underline-offset-4"
             >
               Public Queue Page ↗
-            </a>
+            </Link>
           </div>
         </div>
       </header>
@@ -337,4 +356,3 @@ export default function StaffPage() {
     </main>
   );
 }
-

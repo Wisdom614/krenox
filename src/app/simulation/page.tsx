@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { Button, Logo } from "@/components/ui";
 import { SimulationResults, runSimulation } from "@/lib/api";
 
@@ -37,10 +38,29 @@ export default function SimulationPage() {
     }
   }
 
-  // Run automatically on first load to showcase baseline data
   useEffect(() => {
-    handleRunSimulation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let ignore = false;
+    runSimulation({
+      num_customers: 80,
+      arrival_interval_mins: 2.5,
+      service_duration_mins: 8.0,
+      num_counters: 3,
+      transit_time_mins: 3.0,
+      random_seed: 42,
+    })
+      .then((data) => {
+        if (!ignore) setResults(data);
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          const msg = err instanceof Error ? err.message : "Simulation execution error";
+          setErrorMsg(msg);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   function handleExportCsv() {
@@ -79,18 +99,18 @@ export default function SimulationPage() {
           </div>
 
           <div className="flex items-center gap-4">
-            <a
+            <Link
               href="/"
               className="text-xs font-semibold text-soft hover:text-ink transition underline underline-offset-4"
             >
               Public Home ↗
-            </a>
-            <a
+            </Link>
+            <Link
               href="/staff"
               className="text-xs font-semibold text-soft hover:text-ink transition underline underline-offset-4"
             >
               Staff Console ↗
-            </a>
+            </Link>
           </div>
         </div>
       </header>
@@ -354,3 +374,4 @@ export default function SimulationPage() {
     </main>
   );
 }
+

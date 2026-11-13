@@ -143,7 +143,7 @@ export async function fetchStaffQueue(serviceId: string): Promise<StaffQueueStat
   return await res.json();
 }
 
-export async function callNextTicket(serviceId: string, deskName: string): Promise<any> {
+export async function callNextTicket(serviceId: string, deskName: string): Promise<{ status: string; ticket: ApiTicket; desk: string; message: string }> {
   const res = await fetch(`${API_BASE}/staff/call-next`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -156,7 +156,7 @@ export async function callNextTicket(serviceId: string, deskName: string): Promi
   return await res.json();
 }
 
-export async function updateTicketStatus(ticketId: string, status: string): Promise<any> {
+export async function updateTicketStatus(ticketId: string, status: string): Promise<{ status: string; ticket: ApiTicket }> {
   const res = await fetch(`${API_BASE}/staff/update-status`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

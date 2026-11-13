@@ -39,9 +39,9 @@ export default function WaitingExperience({ ticket: initialTicket, ticketId: que
   const [totalWaiting, setTotalWaiting] = useState<number>(10);
   const [openDesks, setOpenDesks] = useState<number>(2);
   const [estWaitMinutes, setEstWaitMinutes] = useState<number>(8);
-  const [calledDeskName, setCalledDeskName] = useState<string>("Desk 1");
+  const [calledDeskName] = useState<string>("Desk 1");
 
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  
   const [copiedPin, setCopiedPin] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [hasPlayedChime, setHasPlayedChime] = useState(false);
@@ -103,11 +103,7 @@ export default function WaitingExperience({ ticket: initialTicket, ticketId: que
   }, [activeTicketId, playCallingChime, hasPlayedChime]);
 
   // Initial load
-  useEffect(() => {
-    if (activeTicketId) {
-      syncLiveStatus();
-    }
-  }, [activeTicketId, syncLiveStatus]);
+  
 
   // Smart Realtime: Supabase WebSocket channel + Polling fallback
   useEffect(() => {

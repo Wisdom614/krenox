@@ -155,3 +155,4 @@ def run_queue_simulation(
             "minutes_saved_physically_per_student": round(max(conv_avg_physical - v_avg_physical, 0.0), 2),
         },
     }
+
