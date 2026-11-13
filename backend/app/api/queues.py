@@ -1,10 +1,50 @@
 import random
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import Optional
 from app.core.supabase import supabase_client
 from app.models.schemas import JoinQueueRequest, TicketResponse, QueueStatusResponse
+from app.services.whatsapp import whatsapp_service
 
 router = APIRouter(prefix="/queues", tags=["queues"])
+
+# In-memory store for OTPs (or store in Supabase table)
+OTP_STORE: dict[str, str] = {}
+
+class RequestOtpPayload(BaseModel):
+    phone: str
+
+class VerifyOtpPayload(BaseModel):
+    phone: str
+    code: str
+
+@router.post("/whatsapp/send-otp")
+async def send_whatsapp_otp(payload: RequestOtpPayload):
+    """Sends a 6-digit verification code to the user's WhatsApp number."""
+    phone = payload.phone.strip()
+    if len(phone) < 8:
+        raise HTTPException(status_code=400, detail="Invalid phone number format")
+
+    code = f"{random.randint(100000, 999999)}"
+    OTP_STORE[phone] = code
+
+    # Dispatch via WhatsApp service (or terminal simulator if Meta API not set)
+    await whatsapp_service.send_verification_otp(phone, code)
+
+    return {"status": "ok", "message": f"Verification code sent to {phone}", "dev_code": code}
+
+@router.post("/whatsapp/verify-otp")
+def verify_whatsapp_otp(payload: VerifyOtpPayload):
+    """Verifies that the entered OTP matches."""
+    phone = payload.phone.strip()
+    expected = OTP_STORE.get(phone)
+    if not expected or expected != payload.code.strip():
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
+
+    # Clear OTP after successful verification
+    del OTP_STORE[phone]
+    return {"status": "verified", "message": "WhatsApp number confirmed successfully"}
 
 @router.get("/services")
 def list_services():
@@ -13,7 +53,7 @@ def list_services():
     return response.data
 
 @router.post("/join", response_model=TicketResponse)
-def join_queue(req: JoinQueueRequest):
+async def join_queue(req: JoinQueueRequest):
     """Customer joins a queue; allocates ticket number and security PIN."""
     # Fetch service details to get ticket prefix
     svc_res = supabase_client.table("services").select("*").eq("id", req.service_id).single().execute()
@@ -23,9 +63,16 @@ def join_queue(req: JoinQueueRequest):
     svc = svc_res.data
     prefix = svc.get("prefix", "Q")
     
-    # Generate sequential or random ticket number for the day
-    random_num = random.randint(10, 99)
-    ticket_num = f"{prefix}-0{random_num}"
+    # Calculate daily sequential ticket number
+    count_today = (
+        supabase_client.table("tickets")
+        .select("id", count="exact")
+        .eq("service_id", req.service_id)
+        .gte("joined_at", datetime.utcnow().strftime("%Y-%m-%d 00:00:00"))
+        .execute()
+    )
+    next_idx = (count_today.count or 0) + 40
+    ticket_num = f"{prefix}-{next_idx:03d}"
     pin = f"{random.randint(100000, 999999)}"
 
     ticket_data = {
@@ -55,6 +102,17 @@ def join_queue(req: JoinQueueRequest):
 
     position = waiting_count.count or 1
     est_wait = position * (svc.get("avg_duration_minutes", 15) // 2)
+
+    # If WhatsApp opt-in was provided, dispatch instant confirmation ticket!
+    if req.reminder_opt_in and req.customer_phone:
+        await whatsapp_service.send_ticket_confirmation(
+            phone=req.customer_phone,
+            ticket_number=ticket_num,
+            service_name=svc["name"],
+            position=position,
+            est_wait=est_wait,
+            pin=pin
+        )
 
     return TicketResponse(
         id=created["id"],

@@ -22,3 +22,4 @@ app.include_router(queues.router)
 @app.get("/")
 def health_check():
     return {"status": "ok", "service": "krenox-backend", "version": "0.1.0"}
+

@@ -24,3 +24,4 @@ class QueueStatusResponse(BaseModel):
     total_waiting: int
     customers_ahead: int
     open_desks: int
+
