@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     # WA-AKG Gateway Settings
     WA_BASE_URL: str = "https://akg.wisedev.online"
     WA_API_KEY: str = "wag_HHOZAgSD74TEXvdbutSttNKbJYDCAsMT"
-    WA_SESSION_ID: str = "es2ou"
+    WA_SESSION_ID: str = "9p9jve"
 
     PORT: int = 8000
 
