@@ -1,66 +1,164 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Logo, Modal } from "@/components/ui";
-import { MockTicket, TicketStatus, clearTicket, getService, organisation } from "@/lib/queue";
-
-const TOTAL_AT_JOIN = 12;
+import { MockTicket, clearTicket, getService, organisation } from "@/lib/queue";
+import { ApiQueueStatus, fetchTicketStatus } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 
 type Props = {
-  ticket: MockTicket;
+  ticket?: MockTicket;
+  ticketId?: string;
 };
 
-// Simulation timeline for testing & review
-const timeline: { status: TicketStatus; position: number; currentDesk?: string; servingTicket?: string }[] = [
-  { status: "waiting", position: 4, currentDesk: "Desk 1", servingTicket: "R-038" },
-  { status: "waiting", position: 3, currentDesk: "Desk 2", servingTicket: "R-039" },
-  { status: "waiting", position: 2, currentDesk: "Desk 1", servingTicket: "R-040" },
-  { status: "waiting", position: 1, currentDesk: "Desk 2", servingTicket: "R-041" },
-  { status: "called", position: 1, currentDesk: "Desk 1", servingTicket: "Your Turn" },
-  { status: "serving", position: 1, currentDesk: "Desk 1", servingTicket: "Serving" },
-  { status: "completed", position: 0, currentDesk: "Desk 1", servingTicket: "Done" },
-];
-
-export default function WaitingExperience({ ticket }: Props) {
+export default function WaitingExperience({ ticket: initialTicket, ticketId: queryTicketId }: Props) {
   const router = useRouter();
-  const service = getService(ticket.serviceId);
 
-  const [showSuccessModal, setShowSuccessModal] = useState(true);
+  // Active ticket metadata
+  const [ticketData, setTicketData] = useState<{
+    id?: string;
+    ticket_number: string;
+    pin: string;
+    serviceId: string;
+    customer_name: string;
+    masked_phone?: string;
+    status: string;
+    reminder: boolean;
+  }>({
+    ticket_number: initialTicket?.ticket || "R-040",
+    pin: initialTicket?.pin || "123456",
+    serviceId: initialTicket?.serviceId || "records",
+    customer_name: initialTicket?.name || "Student",
+    masked_phone: initialTicket?.phone || "",
+    status: "waiting",
+    reminder: initialTicket?.reminder ?? true,
+  });
+
+  const [position, setPosition] = useState<number>(initialTicket ? 3 : 1);
+  const [totalWaiting, setTotalWaiting] = useState<number>(10);
+  const [openDesks, setOpenDesks] = useState<number>(2);
+  const [estWaitMinutes, setEstWaitMinutes] = useState<number>(8);
+  const [calledDeskName, setCalledDeskName] = useState<string>("Desk 1");
+
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [copiedPin, setCopiedPin] = useState(false);
-  const [stepIndex, setStepIndex] = useState(0);
-  const [overrideStatus, setOverrideStatus] = useState<TicketStatus | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [hasPlayedChime, setHasPlayedChime] = useState(false);
 
-  // Auto-dismiss the initial welcome celebration after 4.5 seconds
-  useEffect(() => {
-    const timer = window.setTimeout(() => setShowSuccessModal(false), 4500);
-    return () => window.clearTimeout(timer);
+  const prevStatusRef = useRef<string>("waiting");
+  const activeTicketId = queryTicketId || ticketData.id;
+
+  // Audio Chime notification when status transitions to "called"
+  const playCallingChime = useCallback(() => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.15); // A5
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.8);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.85);
+    } catch {
+      // Audio context might be restricted before user gesture
+    }
   }, []);
 
-  const currentTimeline = timeline[stepIndex];
-  const activeStatus: TicketStatus = overrideStatus ?? currentTimeline.status;
-  const currentPosition = currentTimeline.position;
+  // Poll server for exact position calculations
+  const syncLiveStatus = useCallback(async () => {
+    if (!activeTicketId) return;
+    try {
+      const statusRes: ApiQueueStatus = await fetchTicketStatus(activeTicketId);
+      const t = statusRes.ticket;
+      
+      setTicketData((prev) => ({
+        ...prev,
+        id: t.id,
+        ticket_number: t.ticket_number,
+        pin: t.pin,
+        customer_name: t.customer_name,
+        masked_phone: t.masked_phone || prev.masked_phone,
+        status: t.status,
+      }));
 
-  const ahead = Math.max(currentPosition - 1, 0);
+      if (t.position) setPosition(t.position);
+      setTotalWaiting(statusRes.total_waiting);
+      setOpenDesks(statusRes.open_desks);
+      if (t.estimated_wait_minutes) setEstWaitMinutes(t.estimated_wait_minutes);
+
+      // Play alert if called
+      if (t.status === "called" && prevStatusRef.current !== "called" && !hasPlayedChime) {
+        playCallingChime();
+        setHasPlayedChime(true);
+      }
+      prevStatusRef.current = t.status;
+    } catch {
+      // Silent catch on offline
+    }
+  }, [activeTicketId, playCallingChime, hasPlayedChime]);
+
+  // Initial load
+  useEffect(() => {
+    if (activeTicketId) {
+      syncLiveStatus();
+    }
+  }, [activeTicketId, syncLiveStatus]);
+
+  // Smart Realtime: Supabase WebSocket channel + Polling fallback
+  useEffect(() => {
+    // 1. Polling interval every 3 seconds to keep position accurate as other tickets advance
+    const pollInterval = setInterval(() => {
+      syncLiveStatus();
+    }, 3000);
+
+    // 2. Supabase Realtime WebSocket for instantaneous updates
+    const channel = supabase
+      .channel("tickets-realtime-changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "tickets",
+        },
+        (payload) => {
+          // If our ticket specifically was updated (e.g. called to desk)
+          if (activeTicketId && payload.new && payload.new.id === activeTicketId) {
+            syncLiveStatus();
+          } else {
+            // If any ticket in queue was completed, recalculate positions immediately
+            syncLiveStatus();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(pollInterval);
+      supabase.removeChannel(channel);
+    };
+  }, [activeTicketId, syncLiveStatus]);
+
+  const service = getService(ticketData.serviceId);
+  const ahead = Math.max(position - 1, 0);
   const progressPercent = Math.min(
     100,
-    Math.round(((TOTAL_AT_JOIN - currentPosition) / (TOTAL_AT_JOIN - 1)) * 100)
+    Math.max(10, Math.round(((totalWaiting - position) / Math.max(totalWaiting - 1, 1)) * 100))
   );
-  const estWaitMinutes = currentPosition <= 2 ? 5 : currentPosition * 3;
 
   function copyPin() {
-    navigator.clipboard?.writeText(ticket.pin);
+    navigator.clipboard?.writeText(ticketData.pin);
     setCopiedPin(true);
     setTimeout(() => setCopiedPin(false), 2000);
   }
 
   function handleCancelTicket() {
     setConfirmCancel(false);
-    setOverrideStatus("cancelled");
-  }
-
-  function handleExit() {
     clearTicket();
     router.push("/");
   }
@@ -72,54 +170,56 @@ export default function WaitingExperience({ ticket }: Props) {
         <div className="mx-auto flex max-w-4xl items-center justify-between px-5 py-4 sm:px-8">
           <Logo />
           <div className="flex items-center gap-3">
-            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-mint px-3 py-1 text-xs font-semibold text-brand-ink">
-              <span className="h-2 w-2 rounded-full bg-ok animate-pulse" /> Live Room
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-mint px-3 py-1 text-xs font-semibold text-brand-ink">
+              <span className="h-2 w-2 rounded-full bg-ok animate-pulse" /> Live Realtime Connected
             </span>
             <button
               onClick={() => router.push("/")}
               className="text-xs font-semibold text-soft hover:text-ink transition underline underline-offset-4"
             >
-              Exit to Home
+              Exit
             </button>
           </div>
         </div>
       </header>
 
       <div className="mx-auto max-w-3xl px-5 pt-8 sm:px-8">
-        {/* ── Status Banner (When Called or Special State) ── */}
-        {activeStatus === "called" && (
+        {/* ── Status Banner: When Called ── */}
+        {ticketData.status === "called" && (
           <div
             role="alert"
             className="mb-6 rounded-3xl bg-brand p-6 text-white shadow-xl ring-4 ring-brand/20 animate-bounce"
           >
             <div className="flex items-center gap-4">
-              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/20 text-2xl font-bold">
+              <div className="grid h-14 w-14 place-items-center rounded-2xl bg-white/20 text-3xl font-bold">
                 📢
               </div>
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-[#98ebd1]">Now Calling</p>
-                <h2 className="text-2xl font-bold">Please proceed to Desk 1</h2>
-                <p className="mt-0.5 text-sm text-white/90">
-                  Staff member is ready for Ticket <span className="font-mono font-bold">{ticket.ticket}</span>.
+                <h2 className="text-2xl font-bold sm:text-3xl">Please proceed to {calledDeskName}</h2>
+                <p className="mt-1 text-sm text-white/90">
+                  Staff member is ready for Ticket <span className="font-mono font-bold text-white text-base">{ticketData.ticket_number}</span>.
                 </p>
               </div>
             </div>
           </div>
         )}
 
-        {activeStatus === "serving" && (
-          <div className="mb-6 rounded-3xl bg-[#087257] p-5 text-white shadow-lg">
+        {/* ── Status Banner: Serving ── */}
+        {ticketData.status === "serving" && (
+          <div className="mb-6 rounded-3xl bg-[#087257] p-6 text-white shadow-lg">
             <div className="flex items-center gap-3">
-              <span className="text-2xl">✨</span>
+              <span className="text-3xl">✨</span>
               <div>
-                <h3 className="font-bold">You are being served</h3>
-                <p className="text-xs text-white/90">Service in progress at Desk 1.</p>
+                <h3 className="font-bold text-lg">You are being served</h3>
+                <p className="text-xs text-white/90">Service currently in progress at {calledDeskName}.</p>
               </div>
             </div>
           </div>
         )}
 
-        {activeStatus === "completed" && (
+        {/* ── Status Banner: Completed ── */}
+        {ticketData.status === "completed" && (
           <div className="mb-6 rounded-3xl bg-white p-8 text-center shadow-sm border border-line">
             <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-mint text-3xl text-ok mb-4">
               ✓
@@ -128,29 +228,14 @@ export default function WaitingExperience({ ticket }: Props) {
             <p className="mt-2 text-sm text-soft max-w-md mx-auto">
               Your session for {service.name} has concluded. Thank you for using Krenox!
             </p>
-            <Button onClick={handleExit} className="mt-6">
+            <Button onClick={() => { clearTicket(); router.push("/"); }} className="mt-6">
               Return to Homepage
             </Button>
           </div>
         )}
 
-        {activeStatus === "cancelled" && (
-          <div className="mb-6 rounded-3xl bg-white p-8 text-center shadow-sm border border-danger/20">
-            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#fde8e8] text-3xl text-danger mb-4">
-              ✕
-            </div>
-            <h2 className="text-2xl font-bold text-ink">Ticket Cancelled</h2>
-            <p className="mt-2 text-sm text-soft max-w-md mx-auto">
-              This ticket has been withdrawn from the queue. You can take a new ticket anytime.
-            </p>
-            <Button onClick={handleExit} className="mt-6">
-              Take a New Ticket
-            </Button>
-          </div>
-        )}
-
         {/* ── Main Virtual Ticket Pass ── */}
-        {activeStatus !== "completed" && activeStatus !== "cancelled" && (
+        {ticketData.status !== "completed" && (
           <div className="overflow-hidden rounded-[2.2rem] border border-white/80 bg-white shadow-[0_20px_60px_rgba(16,42,54,.08)]">
             {/* Pass Header Banner */}
             <div className="bg-[#0b3842] px-6 py-6 text-white sm:px-8">
@@ -163,16 +248,16 @@ export default function WaitingExperience({ ticket }: Props) {
                 <div className="text-right">
                   <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3.5 py-1.5 text-xs font-semibold text-white backdrop-blur">
                     <span className="h-2 w-2 rounded-full bg-[#5fd0b0] animate-pulse" />
-                    {activeStatus === "waiting"
-                      ? currentPosition <= 2
+                    {ticketData.status === "waiting"
+                      ? position <= 2
                         ? "Turn Approaching"
                         : "In Queue"
-                      : activeStatus === "called"
+                      : ticketData.status === "called"
                       ? "Called to Desk"
                       : "Serving"}
                   </span>
                   <p className="mt-2 text-xs font-mono tracking-wider text-white/70">
-                    Ticket <span className="font-bold text-white text-sm">{ticket.ticket}</span>
+                    Ticket <span className="font-bold text-white text-sm">{ticketData.ticket_number}</span>
                   </p>
                 </div>
               </div>
@@ -183,17 +268,19 @@ export default function WaitingExperience({ ticket }: Props) {
               <div className="grid gap-6 sm:grid-cols-[1.2fr_.8fr] sm:items-center">
                 {/* Position Highlight */}
                 <div className="rounded-3xl bg-[#f7f9f8] p-6 text-center sm:text-left border border-line/60">
-                  <p className="text-xs font-semibold text-soft">Your Live Position</p>
+                  <p className="text-xs font-semibold text-soft">Your Live Queue Position</p>
                   <div className="mt-2 flex items-baseline justify-center sm:justify-start gap-3">
                     <span className="text-6xl sm:text-7xl font-bold tracking-tight text-brand">
-                      {currentPosition}
+                      {ticketData.status === "called" ? "1" : position}
                     </span>
                     <span className="text-sm font-medium text-soft">
-                      in line ({TOTAL_AT_JOIN} total joined)
+                      in line ({totalWaiting} total joined)
                     </span>
                   </div>
                   <p className="mt-2 text-sm font-medium text-brand-ink">
-                    {ahead === 0 ? (
+                    {ticketData.status === "called" ? (
+                      <span className="font-bold text-ok">🎉 It is your turn now! Step up to the counter.</span>
+                    ) : ahead === 0 ? (
                       <span className="font-bold text-ok">🎉 You are next in line!</span>
                     ) : (
                       <>
@@ -207,40 +294,44 @@ export default function WaitingExperience({ ticket }: Props) {
                 <div className="grid grid-cols-2 sm:grid-cols-1 gap-3">
                   <div className="rounded-2xl border border-line/80 bg-white p-4">
                     <p className="text-xs font-medium text-soft">Estimated Wait</p>
-                    <p className="mt-1 text-2xl font-bold text-ink">~{estWaitMinutes} mins</p>
-                    <p className="mt-0.5 text-[11px] text-soft">Dynamic queue calculation</p>
+                    <p className="mt-1 text-2xl font-bold text-ink">
+                      {ticketData.status === "called" ? "Now" : `~${estWaitMinutes} mins`}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-soft">Dynamic realtime calculation</p>
                   </div>
                   <div className="rounded-2xl border border-line/80 bg-white p-4">
                     <p className="text-xs font-medium text-soft">Active Desks</p>
                     <p className="mt-1 text-lg font-bold text-brand-ink">
-                      {service.desksOpen} open desks
+                      {openDesks} open desks
                     </p>
-                    <p className="mt-0.5 text-[11px] text-soft">Currently processing tickets</p>
+                    <p className="mt-0.5 text-[11px] text-soft">Processing tickets live</p>
                   </div>
                 </div>
               </div>
 
-              {/* Progress Milestones */}
+              {/* Progress Bar Flow */}
               <div className="mt-8 border-t border-line/70 pt-6">
                 <div className="flex items-center justify-between text-xs font-semibold text-ink">
                   <span>Queue Flow</span>
-                  <span className="text-brand">{progressPercent}% closer to desk</span>
+                  <span className="text-brand">
+                    {ticketData.status === "called" ? "100% (At Counter)" : `${progressPercent}% closer to desk`}
+                  </span>
                 </div>
                 <div
                   className="mt-3 h-3 overflow-hidden rounded-full bg-[#e3ece9]"
                   role="progressbar"
-                  aria-valuenow={progressPercent}
+                  aria-valuenow={ticketData.status === "called" ? 100 : progressPercent}
                   aria-valuemin={0}
                   aria-valuemax={100}
                 >
                   <div
                     className="h-full rounded-full bg-brand transition-all duration-700 ease-out"
-                    style={{ width: `${progressPercent}%` }}
+                    style={{ width: `${ticketData.status === "called" ? 100 : progressPercent}%` }}
                   />
                 </div>
                 <div className="mt-3 flex justify-between text-[11px] text-soft">
-                  <span>Joined at #{TOTAL_AT_JOIN}</span>
-                  <span>Currently #{currentPosition}</span>
+                  <span>Joined Queue</span>
+                  <span>Currently #{position}</span>
                   <span>Desk Service</span>
                 </div>
               </div>
@@ -257,7 +348,7 @@ export default function WaitingExperience({ ticket }: Props) {
                   <div>
                     <p className="text-xs font-semibold text-brand">Ticket Recovery PIN</p>
                     <p className="mt-1 font-mono text-2xl font-bold tracking-widest text-ink">
-                      {ticket.pin}
+                      {ticketData.pin}
                     </p>
                   </div>
                   <button
@@ -271,12 +362,14 @@ export default function WaitingExperience({ ticket }: Props) {
 
                 <div className="rounded-2xl bg-[#fafbf9] p-4 border border-line text-xs leading-relaxed text-soft">
                   <p className="font-semibold text-ink">
-                    {ticket.reminder ? "📱 WhatsApp Alert Active" : "📱 In-Browser Tracking"}
+                    {ticketData.reminder ? "📱 WhatsApp Alert Active" : "📱 In-Browser Tracking"}
                   </p>
                   <p className="mt-1">
-                    {ticket.reminder && ticket.phone
-                      ? `Alerts will ping ${ticket.phone} when only 2 people remain ahead.`
-                      : "Keep this browser tab open to follow real-time calls."}
+                    {ticketData.masked_phone ? (
+                      <>Alerts sent to <span className="font-mono font-bold text-ink">{ticketData.masked_phone}</span>.</>
+                    ) : (
+                      "Your number is safely masked and alerts are active."
+                    )}
                   </p>
                 </div>
               </div>
@@ -284,112 +377,19 @@ export default function WaitingExperience({ ticket }: Props) {
           </div>
         )}
 
-        {/* ── Desk Activity Monitor ── */}
-        <div className="mt-6 rounded-3xl bg-white p-6 shadow-sm border border-line">
-          <div className="flex items-center justify-between border-b border-line/60 pb-4">
-            <div>
-              <h3 className="font-bold text-ink">Desk Live Activity</h3>
-              <p className="text-xs text-soft">Current queue handling by service staff</p>
-            </div>
-            <span className="text-xs font-semibold text-ok bg-[#e9f7f0] px-2.5 py-1 rounded-full">
-              ● All counters active
-            </span>
-          </div>
-
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <div className="flex items-center justify-between rounded-2xl bg-[#f8faf9] p-4 border border-line/50">
-              <div>
-                <p className="text-xs font-semibold text-soft">Counter Desk 1</p>
-                <p className="text-sm font-bold text-ink">Serving Ticket R-039</p>
-              </div>
-              <span className="text-xs font-medium text-brand">Processing</span>
-            </div>
-            <div className="flex items-center justify-between rounded-2xl bg-[#f8faf9] p-4 border border-line/50">
-              <div>
-                <p className="text-xs font-semibold text-soft">Counter Desk 2</p>
-                <p className="text-sm font-bold text-ink">Serving Ticket R-040</p>
-              </div>
-              <span className="text-xs font-medium text-brand">Processing</span>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Demo Testing Controls (Prototype Sandbox) ── */}
-        <div className="mt-6 rounded-3xl border border-line/80 bg-white/70 p-5 backdrop-blur">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-bold text-soft uppercase tracking-wider">
-              Prototype Simulation Controls
-            </p>
-            <span className="text-[11px] text-soft">Interactive Demo</span>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2.5">
-            <Button
-              variant="secondary"
-              className="!py-2 !px-4 !text-xs"
-              disabled={!!overrideStatus || stepIndex === timeline.length - 1}
-              onClick={() => setStepIndex((prev) => prev + 1)}
-            >
-              Advance Queue ⏭
-            </Button>
-            <Button
-              variant="secondary"
-              className="!py-2 !px-4 !text-xs"
-              onClick={() => {
-                setStepIndex(0);
-                setOverrideStatus(null);
-              }}
-            >
-              Reset ↺
-            </Button>
-            <Button
-              variant="secondary"
-              className="!py-2 !px-4 !text-xs"
-              onClick={() => setOverrideStatus("called")}
-            >
-              Simulate &quot;Now Calling&quot;
-            </Button>
-            <Button
-              variant="ghost"
-              className="!py-2 !px-4 !text-xs !text-danger ml-auto"
+        {/* ── Cancel / Leave Option ── */}
+        {ticketData.status !== "completed" && (
+          <div className="mt-8 text-center">
+            <button
+              type="button"
               onClick={() => setConfirmCancel(true)}
+              className="text-xs font-bold text-danger hover:underline transition"
             >
-              Cancel Ticket
-            </Button>
+              Cancel this ticket / Leave queue
+            </button>
           </div>
-        </div>
+        )}
       </div>
-
-      {/* ── Initial Success Celebration Modal ── */}
-      {showSuccessModal && (
-        <Modal titleId="success-title" onClose={() => setShowSuccessModal(false)} size="md">
-          <div className="p-7 text-center">
-            <div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-mint text-4xl text-ok mb-5 shadow-inner">
-              ✓
-            </div>
-            <p className="text-xs font-bold text-brand uppercase tracking-wider">
-              Registration Confirmed
-            </p>
-            <h2 id="success-title" className="mt-1 text-2xl font-bold text-ink">
-              You are in the queue!
-            </h2>
-            <p className="mt-2 text-sm text-soft leading-relaxed">
-              Assigned <span className="font-bold text-ink">{ticket.ticket}</span> for {service.name}.
-            </p>
-
-            <div className="mt-6 rounded-2xl bg-[#f7f9f8] p-4 border border-line">
-              <p className="text-xs text-soft font-medium">Your Recovery PIN</p>
-              <p className="mt-1 font-mono text-3xl font-bold tracking-widest text-brand">
-                {ticket.pin}
-              </p>
-              <p className="mt-1 text-[11px] text-soft">Save this to reopen your ticket anytime.</p>
-            </div>
-
-            <Button onClick={() => setShowSuccessModal(false)} className="mt-6 w-full">
-              Enter Waiting Room →
-            </Button>
-          </div>
-        </Modal>
-      )}
 
       {/* ── Cancel Ticket Confirmation Modal ── */}
       {confirmCancel && (
@@ -402,7 +402,7 @@ export default function WaitingExperience({ ticket }: Props) {
               Leave this queue?
             </h3>
             <p className="mt-2 text-sm text-soft leading-relaxed">
-              If you leave now, you will lose ticket <span className="font-bold">{ticket.ticket}</span> and your position #{currentPosition}.
+              If you leave now, you will forfeit ticket <span className="font-bold">{ticketData.ticket_number}</span> and your spot #{position}.
             </p>
             <div className="mt-6 flex flex-col sm:flex-row gap-3">
               <Button
@@ -410,7 +410,7 @@ export default function WaitingExperience({ ticket }: Props) {
                 className="flex-1"
                 onClick={() => setConfirmCancel(false)}
               >
-                Keep My Place
+                Keep My Spot
               </Button>
               <Button
                 variant="danger"

@@ -19,3 +19,4 @@ def mask_phone_number(phone: Optional[str]) -> str:
     start = digits[:3]
     end = digits[-2:]
     return f"{start} ••• •{end}"
+
