@@ -2,215 +2,427 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Eyebrow, Logo, Modal } from "@/components/ui";
+import { Button, Logo, Modal } from "@/components/ui";
 import { MockTicket, TicketStatus, clearTicket, getService, organisation } from "@/lib/queue";
 
 const TOTAL_AT_JOIN = 12;
 
-/** Mock timeline used by the design-preview controls. */
-const timeline: { status: TicketStatus; position: number }[] = [
-  { status: "waiting", position: 4 },
-  { status: "waiting", position: 3 },
-  { status: "waiting", position: 2 },
-  { status: "waiting", position: 1 },
-  { status: "called", position: 1 },
-  { status: "serving", position: 1 },
-  { status: "completed", position: 1 },
+type Props = {
+  ticket: MockTicket;
+};
+
+// Simulation timeline for testing & review
+const timeline: { status: TicketStatus; position: number; currentDesk?: string; servingTicket?: string }[] = [
+  { status: "waiting", position: 4, currentDesk: "Desk 1", servingTicket: "R-038" },
+  { status: "waiting", position: 3, currentDesk: "Desk 2", servingTicket: "R-039" },
+  { status: "waiting", position: 2, currentDesk: "Desk 1", servingTicket: "R-040" },
+  { status: "waiting", position: 1, currentDesk: "Desk 2", servingTicket: "R-041" },
+  { status: "called", position: 1, currentDesk: "Desk 1", servingTicket: "Your Turn" },
+  { status: "serving", position: 1, currentDesk: "Desk 1", servingTicket: "Serving" },
+  { status: "completed", position: 0, currentDesk: "Desk 1", servingTicket: "Done" },
 ];
 
-type Tone = "ok" | "warn" | "danger" | "muted";
-const statusInfo: Record<TicketStatus, { label: string; tone: Tone; title: string; message: string }> = {
-  waiting: { label: "Waiting", tone: "ok", title: "You’re in the queue", message: "Keep this page open or come back to it. We’ll show when your turn is approaching." },
-  called: { label: "Called", tone: "warn", title: "It’s your turn — please go to the desk", message: "Head to the service desk now. If you do not arrive in time, your ticket may be marked absent." },
-  serving: { label: "Being served", tone: "ok", title: "You’re being served", message: "A staff member is helping you now." },
-  completed: { label: "Completed", tone: "muted", title: "All done — thank you", message: "Your service is complete. This ticket is now closed." },
-  skipped: { label: "Skipped", tone: "danger", title: "Your ticket was skipped", message: "Staff moved on because you were not available. Please speak to the desk or join the queue again." },
-  absent: { label: "Marked absent", tone: "danger", title: "You were marked absent", message: "You were not present when called. Please join the queue again if you still need service." },
-  cancelled: { label: "Cancelled", tone: "danger", title: "Ticket cancelled", message: "This ticket has been removed from the queue." },
-};
-const toneClass: Record<Tone, string> = {
-  ok: "bg-[#e4f4ed] text-ok",
-  warn: "bg-[#fff1d6] text-warn",
-  danger: "bg-[#f7e6e6] text-danger",
-  muted: "bg-line text-muted",
-};
-
-export default function WaitingExperience({ ticket }: { ticket: MockTicket }) {
+export default function WaitingExperience({ ticket }: Props) {
   const router = useRouter();
   const service = getService(ticket.serviceId);
-  const [showSuccess, setShowSuccess] = useState(true);
-  const [step, setStep] = useState(0);
-  const [override, setOverride] = useState<TicketStatus | null>(null);
+
+  const [showSuccessModal, setShowSuccessModal] = useState(true);
+  const [copiedPin, setCopiedPin] = useState(false);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [overrideStatus, setOverrideStatus] = useState<TicketStatus | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
 
+  // Auto-dismiss the initial welcome celebration after 4.5 seconds
   useEffect(() => {
-    const timer = window.setTimeout(() => setShowSuccess(false), 2600);
+    const timer = window.setTimeout(() => setShowSuccessModal(false), 4500);
     return () => window.clearTimeout(timer);
   }, []);
 
-  const current = timeline[step];
-  const status: TicketStatus = override ?? current.status;
-  const position = current.position;
-  const info = statusInfo[status];
-  const isActive = status === "waiting" || status === "called" || status === "serving";
-  const ahead = Math.max(position - 1, 0);
-  const progress = Math.round(((TOTAL_AT_JOIN - position) / (TOTAL_AT_JOIN - 1)) * 100);
-  const estimate = position <= 2 ? 5 : position * 3;
-  const reset = () => { setStep(0); setOverride(null); };
+  const currentTimeline = timeline[stepIndex];
+  const activeStatus: TicketStatus = overrideStatus ?? currentTimeline.status;
+  const currentPosition = currentTimeline.position;
 
-  function leave() {
-    router.push("/");
+  const ahead = Math.max(currentPosition - 1, 0);
+  const progressPercent = Math.min(
+    100,
+    Math.round(((TOTAL_AT_JOIN - currentPosition) / (TOTAL_AT_JOIN - 1)) * 100)
+  );
+  const estWaitMinutes = currentPosition <= 2 ? 5 : currentPosition * 3;
+
+  function copyPin() {
+    navigator.clipboard?.writeText(ticket.pin);
+    setCopiedPin(true);
+    setTimeout(() => setCopiedPin(false), 2000);
   }
-  function cancelTicket() {
+
+  function handleCancelTicket() {
     setConfirmCancel(false);
-    setOverride("cancelled");
+    setOverrideStatus("cancelled");
   }
-  function finishAndClear() {
+
+  function handleExit() {
     clearTicket();
     router.push("/");
   }
 
   return (
-    <main className="min-h-screen bg-canvas text-ink">
-      <header className="mx-auto flex max-w-3xl items-center justify-between px-5 py-6 sm:px-8">
-        <Logo />
-        <span className="rounded-full bg-[#fff4df] px-3 py-1.5 text-xs font-bold text-[#7a5812]">Prototype preview</span>
+    <main className="min-h-screen bg-[#f3f6f5] text-ink pb-20 selection:bg-brand selection:text-white">
+      {/* ── Top Header Navigation ── */}
+      <header className="border-b border-line/60 bg-white/80 backdrop-blur sticky top-0 z-30">
+        <div className="mx-auto flex max-w-4xl items-center justify-between px-5 py-4 sm:px-8">
+          <Logo />
+          <div className="flex items-center gap-3">
+            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-mint px-3 py-1 text-xs font-semibold text-brand-ink">
+              <span className="h-2 w-2 rounded-full bg-ok animate-pulse" /> Live Room
+            </span>
+            <button
+              onClick={() => router.push("/")}
+              className="text-xs font-semibold text-soft hover:text-ink transition underline underline-offset-4"
+            >
+              Exit to Home
+            </button>
+          </div>
+        </div>
       </header>
 
-      <div className="mx-auto max-w-3xl px-5 pb-14 sm:px-8">
-        {showSuccess && (
-          <section className="mb-10 flex min-h-[500px] flex-col items-center justify-center text-center" aria-live="polite">
-            <div className="waiting-check grid h-24 w-24 place-items-center rounded-full bg-[#dff3ea] text-5xl text-ok" aria-hidden>✓</div>
-            <div className="mt-8"><Eyebrow tone="ok">Ticket {ticket.ticket} created</Eyebrow></div>
-            <h1 className="mt-3 max-w-md text-4xl font-semibold tracking-tight sm:text-5xl">You’re successfully in the queue{ticket.name ? `, ${ticket.name.split(" ")[0]}` : ""}!</h1>
-            <p className="mt-4 max-w-sm leading-7 text-muted">Your {service.name} ticket is ready. Keep the recovery PIN below in case you close this page.</p>
-            <div className="mt-7 w-full max-w-sm rounded-2xl border border-[#cde1db] bg-white p-5">
-              <p className="text-xs font-bold uppercase tracking-[.15em] text-soft">Ticket recovery PIN</p>
-              <p className="mt-2 font-mono text-4xl font-bold tracking-[.25em] text-brand">{ticket.pin}</p>
-              <p className="mt-3 text-xs leading-5 text-muted">Separate from your ticket number. Store it safely.</p>
-            </div>
-            <Button className="mt-8" onClick={() => setShowSuccess(false)}>View my queue status</Button>
-          </section>
-        )}
-
-        <section className={`transition-all duration-700 ${showSuccess ? "pointer-events-none h-0 translate-y-6 overflow-hidden opacity-0" : "translate-y-0 opacity-100"}`} aria-hidden={showSuccess}>
-          <div className="border-b border-line pb-7">
-            <Eyebrow>{organisation.name} · Student Services</Eyebrow>
-            <div className="mt-3 flex items-end justify-between gap-4">
+      <div className="mx-auto max-w-3xl px-5 pt-8 sm:px-8">
+        {/* ── Status Banner (When Called or Special State) ── */}
+        {activeStatus === "called" && (
+          <div
+            role="alert"
+            className="mb-6 rounded-3xl bg-brand p-6 text-white shadow-xl ring-4 ring-brand/20 animate-bounce"
+          >
+            <div className="flex items-center gap-4">
+              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/20 text-2xl font-bold">
+                📢
+              </div>
               <div>
-                <h1 className="text-3xl font-semibold tracking-tight">Your waiting room</h1>
-                <p className="mt-2 text-sm text-muted">{service.name} · Main Campus</p>
-              </div>
-              <span className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold ${toneClass[info.tone]}`} role="status">● {info.label}</span>
-            </div>
-          </div>
-
-          {status === "called" && (
-            <div className="pulse-ring mt-7 rounded-2xl bg-brand p-6 text-white" role="alert">
-              <p className="text-xs font-bold uppercase tracking-[.16em] text-[#bfe3e0]">Now calling</p>
-              <p className="mt-2 text-2xl font-semibold">{ticket.ticket} — please go to the service desk</p>
-            </div>
-          )}
-
-          {isActive && status === "waiting" ? (
-            <div className="py-9 text-center">
-              <p className="text-xs font-bold uppercase tracking-[.16em] text-soft">Your queue position</p>
-              <div className="mt-3 flex items-baseline justify-center gap-2">
-                <span className="text-8xl font-semibold tracking-[-.08em] text-brand">{position}</span>
-                <span className="text-lg font-medium text-muted">of {TOTAL_AT_JOIN}</span>
-              </div>
-              <p className="mt-3 text-base font-medium text-brand-ink" aria-live="polite">
-                {ahead === 0 ? "You are next" : `${ahead} ${ahead === 1 ? "customer" : "customers"} ahead of you`}
-              </p>
-            </div>
-          ) : (
-            <div className="py-9 text-center">
-              <h2 className="mx-auto max-w-md text-3xl font-semibold tracking-tight">{info.title}</h2>
-              <p className="mx-auto mt-3 max-w-md leading-7 text-muted">{info.message}</p>
-            </div>
-          )}
-
-          {status === "waiting" && (
-            <>
-              <div className="border-y border-line py-6">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-bold">Queue progress</span>
-                  <span className="font-medium text-muted">{progress}% from your joining position</span>
-                </div>
-                <div className="mt-3 h-3 overflow-hidden rounded-full bg-[#dceae7]" role="progressbar" aria-label="Progress from your joining position" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
-                  <div className="h-full rounded-full bg-brand transition-[width] duration-700 ease-out" style={{ width: `${progress}%` }} />
-                </div>
-                <p className="mt-3 text-sm leading-6 text-soft">This shows your position improving since you joined. It does not predict when service will finish.</p>
-              </div>
-              <div className="grid grid-cols-2 gap-4 py-7">
-                <Fact label="Ticket" value={ticket.ticket} />
-                <Fact label="Estimated wait" value={`~${estimate} min`} note="A prediction, not a guarantee" />
-              </div>
-              <div className="rounded-2xl bg-mint p-5">
-                <p className="font-bold">{position <= 2 ? "Your turn is approaching" : "A quick heads-up"}</p>
-                <p className="mt-2 text-sm leading-6 text-muted">
-                  {ticket.reminder
-                    ? `We’ll send a WhatsApp reminder to ${ticket.phone || "your number"} when you are close to the front. Notifications depend on an external service and may be delayed.`
-                    : "You chose not to receive reminders, so keep an eye on this page."}
+                <p className="text-xs font-bold uppercase tracking-wider text-[#98ebd1]">Now Calling</p>
+                <h2 className="text-2xl font-bold">Please proceed to Desk 1</h2>
+                <p className="mt-0.5 text-sm text-white/90">
+                  Staff member is ready for Ticket <span className="font-mono font-bold">{ticket.ticket}</span>.
                 </p>
               </div>
-            </>
-          )}
-
-          {!isActive && (
-            <div className="grid grid-cols-2 gap-4 border-t border-line py-7">
-              <Fact label="Ticket" value={ticket.ticket} />
-              <Fact label="Service" value={service.name} />
             </div>
-          )}
+          </div>
+        )}
 
-          <div className="mt-8 border-t border-line pt-6">
-            <Eyebrow tone="warn">Design preview controls</Eyebrow>
-            <div className="mt-3 flex flex-wrap gap-3">
-              <Button variant="secondary" className="!py-3" disabled={!!override || step === timeline.length - 1} onClick={() => setStep((s) => s + 1)}>Advance queue</Button>
-              <Button variant="secondary" className="!py-3" disabled={!!override} onClick={() => setOverride("skipped")}>Mark skipped</Button>
-              <Button variant="secondary" className="!py-3" disabled={!!override} onClick={() => setOverride("absent")}>Mark absent</Button>
-              <Button variant="secondary" className="!py-3" onClick={reset}>Reset mock data</Button>
+        {activeStatus === "serving" && (
+          <div className="mb-6 rounded-3xl bg-[#087257] p-5 text-white shadow-lg">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">✨</span>
+              <div>
+                <h3 className="font-bold">You are being served</h3>
+                <p className="text-xs text-white/90">Service in progress at Desk 1.</p>
+              </div>
             </div>
-            <p className="mt-3 text-xs leading-5 text-soft">These controls only demonstrate each ticket state. They are not real-time updates.</p>
+          </div>
+        )}
+
+        {activeStatus === "completed" && (
+          <div className="mb-6 rounded-3xl bg-white p-8 text-center shadow-sm border border-line">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-mint text-3xl text-ok mb-4">
+              ✓
+            </div>
+            <h2 className="text-2xl font-bold">Service Completed</h2>
+            <p className="mt-2 text-sm text-soft max-w-md mx-auto">
+              Your session for {service.name} has concluded. Thank you for using Krenox!
+            </p>
+            <Button onClick={handleExit} className="mt-6">
+              Return to Homepage
+            </Button>
+          </div>
+        )}
+
+        {activeStatus === "cancelled" && (
+          <div className="mb-6 rounded-3xl bg-white p-8 text-center shadow-sm border border-danger/20">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#fde8e8] text-3xl text-danger mb-4">
+              ✕
+            </div>
+            <h2 className="text-2xl font-bold text-ink">Ticket Cancelled</h2>
+            <p className="mt-2 text-sm text-soft max-w-md mx-auto">
+              This ticket has been withdrawn from the queue. You can take a new ticket anytime.
+            </p>
+            <Button onClick={handleExit} className="mt-6">
+              Take a New Ticket
+            </Button>
+          </div>
+        )}
+
+        {/* ── Main Virtual Ticket Pass ── */}
+        {activeStatus !== "completed" && activeStatus !== "cancelled" && (
+          <div className="overflow-hidden rounded-[2.2rem] border border-white/80 bg-white shadow-[0_20px_60px_rgba(16,42,54,.08)]">
+            {/* Pass Header Banner */}
+            <div className="bg-[#0b3842] px-6 py-6 text-white sm:px-8">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold text-[#8ed8c8]">{organisation.name}</p>
+                  <h1 className="mt-1 text-xl font-bold sm:text-2xl">{service.name}</h1>
+                  <p className="text-xs text-white/70">Main Campus · Student Services</p>
+                </div>
+                <div className="text-right">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3.5 py-1.5 text-xs font-semibold text-white backdrop-blur">
+                    <span className="h-2 w-2 rounded-full bg-[#5fd0b0] animate-pulse" />
+                    {activeStatus === "waiting"
+                      ? currentPosition <= 2
+                        ? "Turn Approaching"
+                        : "In Queue"
+                      : activeStatus === "called"
+                      ? "Called to Desk"
+                      : "Serving"}
+                  </span>
+                  <p className="mt-2 text-xs font-mono tracking-wider text-white/70">
+                    Ticket <span className="font-bold text-white text-sm">{ticket.ticket}</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Middle Section: Big Gauge & Position Callout */}
+            <div className="p-6 sm:p-8">
+              <div className="grid gap-6 sm:grid-cols-[1.2fr_.8fr] sm:items-center">
+                {/* Position Highlight */}
+                <div className="rounded-3xl bg-[#f7f9f8] p-6 text-center sm:text-left border border-line/60">
+                  <p className="text-xs font-semibold text-soft">Your Live Position</p>
+                  <div className="mt-2 flex items-baseline justify-center sm:justify-start gap-3">
+                    <span className="text-6xl sm:text-7xl font-bold tracking-tight text-brand">
+                      {currentPosition}
+                    </span>
+                    <span className="text-sm font-medium text-soft">
+                      in line ({TOTAL_AT_JOIN} total joined)
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm font-medium text-brand-ink">
+                    {ahead === 0 ? (
+                      <span className="font-bold text-ok">🎉 You are next in line!</span>
+                    ) : (
+                      <>
+                        <span className="font-bold text-ink">{ahead}</span> {ahead === 1 ? "person" : "people"} ahead of you
+                      </>
+                    )}
+                  </p>
+                </div>
+
+                {/* Estimate & Counter Meta */}
+                <div className="grid grid-cols-2 sm:grid-cols-1 gap-3">
+                  <div className="rounded-2xl border border-line/80 bg-white p-4">
+                    <p className="text-xs font-medium text-soft">Estimated Wait</p>
+                    <p className="mt-1 text-2xl font-bold text-ink">~{estWaitMinutes} mins</p>
+                    <p className="mt-0.5 text-[11px] text-soft">Dynamic queue calculation</p>
+                  </div>
+                  <div className="rounded-2xl border border-line/80 bg-white p-4">
+                    <p className="text-xs font-medium text-soft">Active Desks</p>
+                    <p className="mt-1 text-lg font-bold text-brand-ink">
+                      {service.desksOpen} open desks
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-soft">Currently processing tickets</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Progress Milestones */}
+              <div className="mt-8 border-t border-line/70 pt-6">
+                <div className="flex items-center justify-between text-xs font-semibold text-ink">
+                  <span>Queue Flow</span>
+                  <span className="text-brand">{progressPercent}% closer to desk</span>
+                </div>
+                <div
+                  className="mt-3 h-3 overflow-hidden rounded-full bg-[#e3ece9]"
+                  role="progressbar"
+                  aria-valuenow={progressPercent}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <div
+                    className="h-full rounded-full bg-brand transition-all duration-700 ease-out"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+                <div className="mt-3 flex justify-between text-[11px] text-soft">
+                  <span>Joined at #{TOTAL_AT_JOIN}</span>
+                  <span>Currently #{currentPosition}</span>
+                  <span>Desk Service</span>
+                </div>
+              </div>
+
+              {/* Perforated Divider Ticket Notch */}
+              <div className="relative my-8 border-t-2 border-dashed border-line">
+                <div className="absolute -left-10 -top-3 h-6 w-6 rounded-full bg-[#f3f6f5]" />
+                <div className="absolute -right-10 -top-3 h-6 w-6 rounded-full bg-[#f3f6f5]" />
+              </div>
+
+              {/* Bottom Pass Details: PIN & Recovery */}
+              <div className="grid gap-4 sm:grid-cols-2 items-center">
+                <div className="flex items-center justify-between rounded-2xl bg-mint p-4 border border-brand/10">
+                  <div>
+                    <p className="text-xs font-semibold text-brand">Ticket Recovery PIN</p>
+                    <p className="mt-1 font-mono text-2xl font-bold tracking-widest text-ink">
+                      {ticket.pin}
+                    </p>
+                  </div>
+                  <button
+                    onClick={copyPin}
+                    type="button"
+                    className="rounded-xl bg-white px-3 py-2 text-xs font-bold text-brand shadow-sm hover:bg-white/80 transition"
+                  >
+                    {copiedPin ? "Copied! ✓" : "Copy"}
+                  </button>
+                </div>
+
+                <div className="rounded-2xl bg-[#fafbf9] p-4 border border-line text-xs leading-relaxed text-soft">
+                  <p className="font-semibold text-ink">
+                    {ticket.reminder ? "📱 WhatsApp Alert Active" : "📱 In-Browser Tracking"}
+                  </p>
+                  <p className="mt-1">
+                    {ticket.reminder && ticket.phone
+                      ? `Alerts will ping ${ticket.phone} when only 2 people remain ahead.`
+                      : "Keep this browser tab open to follow real-time calls."}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Desk Activity Monitor ── */}
+        <div className="mt-6 rounded-3xl bg-white p-6 shadow-sm border border-line">
+          <div className="flex items-center justify-between border-b border-line/60 pb-4">
+            <div>
+              <h3 className="font-bold text-ink">Desk Live Activity</h3>
+              <p className="text-xs text-soft">Current queue handling by service staff</p>
+            </div>
+            <span className="text-xs font-semibold text-ok bg-[#e9f7f0] px-2.5 py-1 rounded-full">
+              ● All counters active
+            </span>
           </div>
 
-          <div className="mt-10 flex flex-col gap-3 border-t border-line pt-6 sm:flex-row sm:items-center sm:justify-between">
-            {isActive ? (
-              <>
-                <Button variant="ghost" onClick={leave} className="!px-0 !py-0 self-start">Leave this page</Button>
-                {status === "waiting" && <Button variant="ghost" className="!px-0 !py-0 self-start !text-danger" onClick={() => setConfirmCancel(true)}>Cancel ticket</Button>}
-              </>
-            ) : (
-              <Button onClick={finishAndClear}>Return to Krenox</Button>
-            )}
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="flex items-center justify-between rounded-2xl bg-[#f8faf9] p-4 border border-line/50">
+              <div>
+                <p className="text-xs font-semibold text-soft">Counter Desk 1</p>
+                <p className="text-sm font-bold text-ink">Serving Ticket R-039</p>
+              </div>
+              <span className="text-xs font-medium text-brand">Processing</span>
+            </div>
+            <div className="flex items-center justify-between rounded-2xl bg-[#f8faf9] p-4 border border-line/50">
+              <div>
+                <p className="text-xs font-semibold text-soft">Counter Desk 2</p>
+                <p className="text-sm font-bold text-ink">Serving Ticket R-040</p>
+              </div>
+              <span className="text-xs font-medium text-brand">Processing</span>
+            </div>
           </div>
-        </section>
+        </div>
+
+        {/* ── Demo Testing Controls (Prototype Sandbox) ── */}
+        <div className="mt-6 rounded-3xl border border-line/80 bg-white/70 p-5 backdrop-blur">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold text-soft uppercase tracking-wider">
+              Prototype Simulation Controls
+            </p>
+            <span className="text-[11px] text-soft">Interactive Demo</span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2.5">
+            <Button
+              variant="secondary"
+              className="!py-2 !px-4 !text-xs"
+              disabled={!!overrideStatus || stepIndex === timeline.length - 1}
+              onClick={() => setStepIndex((prev) => prev + 1)}
+            >
+              Advance Queue ⏭
+            </Button>
+            <Button
+              variant="secondary"
+              className="!py-2 !px-4 !text-xs"
+              onClick={() => {
+                setStepIndex(0);
+                setOverrideStatus(null);
+              }}
+            >
+              Reset ↺
+            </Button>
+            <Button
+              variant="secondary"
+              className="!py-2 !px-4 !text-xs"
+              onClick={() => setOverrideStatus("called")}
+            >
+              Simulate &quot;Now Calling&quot;
+            </Button>
+            <Button
+              variant="ghost"
+              className="!py-2 !px-4 !text-xs !text-danger ml-auto"
+              onClick={() => setConfirmCancel(true)}
+            >
+              Cancel Ticket
+            </Button>
+          </div>
+        </div>
       </div>
 
+      {/* ── Initial Success Celebration Modal ── */}
+      {showSuccessModal && (
+        <Modal titleId="success-title" onClose={() => setShowSuccessModal(false)} size="md">
+          <div className="p-7 text-center">
+            <div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-mint text-4xl text-ok mb-5 shadow-inner">
+              ✓
+            </div>
+            <p className="text-xs font-bold text-brand uppercase tracking-wider">
+              Registration Confirmed
+            </p>
+            <h2 id="success-title" className="mt-1 text-2xl font-bold text-ink">
+              You are in the queue!
+            </h2>
+            <p className="mt-2 text-sm text-soft leading-relaxed">
+              Assigned <span className="font-bold text-ink">{ticket.ticket}</span> for {service.name}.
+            </p>
+
+            <div className="mt-6 rounded-2xl bg-[#f7f9f8] p-4 border border-line">
+              <p className="text-xs text-soft font-medium">Your Recovery PIN</p>
+              <p className="mt-1 font-mono text-3xl font-bold tracking-widest text-brand">
+                {ticket.pin}
+              </p>
+              <p className="mt-1 text-[11px] text-soft">Save this to reopen your ticket anytime.</p>
+            </div>
+
+            <Button onClick={() => setShowSuccessModal(false)} className="mt-6 w-full">
+              Enter Waiting Room →
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── Cancel Ticket Confirmation Modal ── */}
       {confirmCancel && (
-        <Modal titleId="cancel-title" onClose={() => setConfirmCancel(false)}>
-          <div className="p-7">
-            <Eyebrow tone="danger">Cancel ticket</Eyebrow>
-            <h2 id="cancel-title" className="mt-3 text-2xl font-semibold tracking-tight">Leave this queue?</h2>
-            <p className="mt-3 leading-7 text-muted">You will lose your place in line. This is a prototype confirmation; in production cancelling is a server-validated action.</p>
-            <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row">
-              <Button variant="secondary" onClick={() => setConfirmCancel(false)} data-autofocus>Keep my ticket</Button>
-              <Button variant="danger" onClick={cancelTicket}>Cancel ticket</Button>
+        <Modal titleId="cancel-modal-title" onClose={() => setConfirmCancel(false)} size="md">
+          <div className="p-7 text-center">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#fde8e8] text-2xl text-danger mb-4">
+              ✕
+            </div>
+            <h3 id="cancel-modal-title" className="text-xl font-bold text-ink">
+              Leave this queue?
+            </h3>
+            <p className="mt-2 text-sm text-soft leading-relaxed">
+              If you leave now, you will lose ticket <span className="font-bold">{ticket.ticket}</span> and your position #{currentPosition}.
+            </p>
+            <div className="mt-6 flex flex-col sm:flex-row gap-3">
+              <Button
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setConfirmCancel(false)}
+              >
+                Keep My Place
+              </Button>
+              <Button
+                variant="danger"
+                className="flex-1"
+                onClick={handleCancelTicket}
+              >
+                Cancel Ticket
+              </Button>
             </div>
           </div>
         </Modal>
       )}
     </main>
-  );
-}
-
-function Fact({ label, value, note }: { label: string; value: string; note?: string }) {
-  return (
-    <div>
-      <p className="text-xs font-bold uppercase tracking-[.14em] text-soft">{label}</p>
-      <p className="mt-2 text-xl font-semibold">{value}</p>
-      {note && <p className="mt-1 text-xs text-soft">{note}</p>}
-    </div>
   );
 }
