@@ -27,7 +27,6 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [otpError, setOtpError] = useState("");
-  const [devOtpHint, setDevOtpHint] = useState("");
 
   const [touched, setTouched] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
@@ -51,18 +50,14 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
 
   async function handleSendOtp() {
     setOtpError("");
-    setDevOtpHint("");
     if (!isValidPhone(phone)) {
       setOtpError("Please enter a valid phone number first.");
       return;
     }
     try {
       setIsVerifyingOtp(true);
-      const res = await sendWhatsAppOtp(phone);
+      await sendWhatsAppOtp(phone);
       setOtpSent(true);
-      if (res.dev_code) {
-        setDevOtpHint(`Code: ${res.dev_code}`);
-      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to send OTP";
       setOtpError(msg);
@@ -300,11 +295,6 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
                     >
                       Confirm
                     </button>
-                    {devOtpHint && (
-                      <span className="self-center text-xs font-mono font-bold text-brand bg-white px-2 py-1 rounded-lg border border-brand/20">
-                        {devOtpHint}
-                      </span>
-                    )}
                   </div>
                 </div>
               )}

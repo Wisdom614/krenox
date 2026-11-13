@@ -29,10 +29,10 @@ async def send_whatsapp_otp(payload: RequestOtpPayload):
     code = f"{random.randint(100000, 999999)}"
     OTP_STORE[phone] = code
 
-    # Dispatch via WhatsApp service (or terminal simulator if Meta API not set)
+    # Dispatch via WA-AKG gateway
     await whatsapp_service.send_verification_otp(phone, code)
 
-    return {"status": "ok", "message": f"Verification code sent to {phone}", "dev_code": code}
+    return {"status": "ok", "message": f"Verification code sent to {phone}"}
 
 @router.post("/whatsapp/verify-otp")
 def verify_whatsapp_otp(payload: VerifyOtpPayload):

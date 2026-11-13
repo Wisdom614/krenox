@@ -27,6 +27,13 @@ class WhatsAppNotificationService:
     def _format_jid(self, phone: str) -> str:
         # Strip '+', spaces, dashes, parentheses
         digits = "".join(filter(str.isdigit, phone))
+        
+        # If user entered local 9-digit Cameroonian number without country code (e.g. 671657357)
+        if len(digits) == 9 and digits.startswith("6"):
+            digits = f"237{digits}"
+        elif len(digits) == 8 and digits.startswith("2"):
+            digits = f"237{digits}"
+
         return f"{digits}@s.whatsapp.net"
 
     async def send_verification_otp(self, phone: str, otp_code: str) -> bool:
@@ -85,7 +92,6 @@ class WhatsAppNotificationService:
                     logger.error(f"WA-AKG dispatch returned status {resp.status_code}: {resp.text}")
                     return False
         except Exception as e:
-            # Graceful failure: notification errors must never crash the queue
             logger.error(f"WA-AKG dispatch error: {e}")
             return False
 

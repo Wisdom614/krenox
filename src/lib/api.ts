@@ -39,7 +39,7 @@ export async function fetchServices(): Promise<ApiService[]> {
   }
 }
 
-export async function sendWhatsAppOtp(phone: string): Promise<{ status: string; dev_code?: string }> {
+export async function sendWhatsAppOtp(phone: string): Promise<{ status: string }> {
   const res = await fetch(`${API_BASE}/queues/whatsapp/send-otp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
