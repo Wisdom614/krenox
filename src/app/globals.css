@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-canvas: #f7f8f6;
+  --color-ink: #102a36;
+  --color-brand: #0d6570;
+  --color-brand-dark: #084d56;
+  --color-brand-ink: #16434b;
+  --color-mint: #eff7f5;
+  --color-muted: #557078;
+  --color-soft: #5f7a80;
+  --color-line: #dce7e4;
+  --color-line-strong: #c3d4d1;
+  --color-ok: #087257;
+  --color-danger: #a43838;
+  --color-warn: #8b6b21;
+}
+
+:root { --background: #f7f8f6; --foreground: #102a36; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { background: var(--background); color: var(--foreground); font-family: Arial, Helvetica, sans-serif; }
+button, a { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }
+
+@keyframes waiting-check { from { opacity: 0; transform: scale(.68); } 70% { transform: scale(1.08); } to { opacity: 1; transform: scale(1); } }
+.waiting-check { animation: waiting-check .65s cubic-bezier(.2,.85,.35,1.25) both; }
+
+@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(13,101,112,.35); } 100% { box-shadow: 0 0 0 18px rgba(13,101,112,0); } }
+.pulse-ring { animation: pulse-ring 1.8s ease-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .waiting-check, .pulse-ring { animation: none; }
+}
