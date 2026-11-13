@@ -76,6 +76,12 @@ export default function Home() {
               How it works
             </a>
             <Link
+              href="/simulation"
+              className="hidden transition hover:text-white md:block text-xs font-bold text-[#6ee7b7]"
+            >
+              Evaluation & Simulation
+            </Link>
+            <Link
               href="/staff"
               className="inline-flex items-center justify-center rounded-full border border-white/30 bg-white/10 px-5 py-2.5 text-sm font-bold text-white backdrop-blur transition hover:bg-white/20"
             >

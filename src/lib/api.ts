@@ -42,6 +42,32 @@ export type StaffQueueState = {
   total_completed: number;
 };
 
+export type SimulationScenarioMetrics = {
+  avg_total_wait_mins: number;
+  max_wait_mins: number;
+  avg_physical_wait_mins: number;
+  counter_utilization_pct: number;
+  avg_queue_length: number;
+  total_served: number;
+  duration_hours: number;
+};
+
+export type SimulationResults = {
+  parameters: {
+    num_customers: number;
+    arrival_interval_mins: number;
+    service_duration_mins: number;
+    num_counters: number;
+    transit_time_mins: number;
+  };
+  conventional: SimulationScenarioMetrics;
+  virtual: SimulationScenarioMetrics;
+  reduction: {
+    physical_wait_reduction_pct: number;
+    minutes_saved_physically_per_student: number;
+  };
+};
+
 // ── Customer Queue Functions ──
 
 export async function fetchServices(): Promise<ApiService[]> {
@@ -139,6 +165,28 @@ export async function updateTicketStatus(ticketId: string, status: string): Prom
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || "Failed to update ticket status");
+  }
+  return await res.json();
+}
+
+// ── Simulation Engine API ──
+
+export async function runSimulation(params: {
+  num_customers: number;
+  arrival_interval_mins: number;
+  service_duration_mins: number;
+  num_counters: number;
+  transit_time_mins: number;
+  random_seed?: number;
+}): Promise<SimulationResults> {
+  const res = await fetch(`${API_BASE}/simulation/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Simulation run failed");
   }
   return await res.json();
 }
