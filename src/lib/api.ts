@@ -91,3 +91,4 @@ export async function fetchTicketStatus(ticketId: string): Promise<ApiQueueStatu
   }
   return await res.json();
 }
+
