@@ -46,9 +46,6 @@ export default function Home() {
 
         <div className="relative mx-auto grid min-h-[620px] max-w-7xl items-center gap-10 px-6 pb-36 pt-10 lg:min-h-[700px] lg:grid-cols-[1.1fr_.9fr] lg:px-8 lg:pb-40">
           <div>
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full bg-white/12 px-3 py-1.5 text-xs font-bold tracking-wide text-[#bdeede] ring-1 ring-white/25 backdrop-blur">
-              <span className="h-2 w-2 rounded-full bg-[#5fd0b0]" /> VIRTUAL QUEUE ACCESS
-            </div>
             <h1 className="max-w-2xl text-5xl font-semibold leading-[1.03] tracking-[-0.05em] sm:text-6xl lg:text-7xl">
               Waiting should not <span className="text-[#7fe0c4]">hold you back.</span>
             </h1>
@@ -66,8 +63,8 @@ export default function Home() {
           </div>
 
           {/* Example ticket */}
-          <div className="relative w-full max-w-[400px] justify-self-start lg:justify-self-end lg:self-start lg:mt-4">
-            <div className="rounded-[1.75rem] border border-white/70 bg-white/95 p-5 text-ink shadow-[0_24px_70px_rgba(0,0,0,.3)] backdrop-blur sm:p-6">
+          <div className="relative w-full max-w-[340px] justify-self-start lg:-mt-24 lg:justify-self-end lg:self-start">
+            <div className="rounded-[1.75rem] border border-white/70 bg-white/95 p-4 text-ink shadow-[0_24px_70px_rgba(0,0,0,.3)] backdrop-blur">
               <div className="flex items-start justify-between">
                 <div>
                   <Eyebrow tone="muted">Example ticket</Eyebrow>
@@ -94,7 +91,6 @@ export default function Home() {
                   <div className="h-full w-[72%] rounded-full bg-[#5fd0b0]" />
                 </div>
               </div>
-              <p className="mt-4 text-xs leading-5 text-soft">Estimates are predictions, not guarantees.</p>
             </div>
           </div>
         </div>
