@@ -4,9 +4,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { ReactNode, useEffect, useRef } from "react";
 
-export function Logo({ href = "/" }: { href?: string }) {
+export function Logo({ href = "/", className = "" }: { href?: string; className?: string }) {
   return (
-    <Link href={href} className="flex items-center gap-3" aria-label="Krenox home">
+    <Link href={href} className={`flex items-center gap-3 ${className}`} aria-label="Krenox home">
       <Image src="/krenox-mark.svg" alt="" width={40} height={40} priority />
       <span className="text-xl font-bold tracking-tight">krenox</span>
     </Link>
