@@ -15,8 +15,12 @@ export type ApiTicket = {
   ticket_number: string;
   pin: string;
   customer_name: string;
+  customer_phone?: string;
   status: string;
   joined_at: string;
+  called_at?: string;
+  served_at?: string;
+  completed_at?: string;
   position?: number;
   estimated_wait_minutes?: number;
 };
@@ -27,6 +31,16 @@ export type ApiQueueStatus = {
   customers_ahead: number;
   open_desks: number;
 };
+
+export type StaffQueueState = {
+  service_id: string;
+  serving: ApiTicket[];
+  waiting: ApiTicket[];
+  total_waiting: number;
+  total_completed: number;
+};
+
+// ── Customer Queue Functions ──
 
 export async function fetchServices(): Promise<ApiService[]> {
   try {
@@ -47,7 +61,7 @@ export async function sendWhatsAppOtp(phone: string): Promise<{ status: string }
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || "Failed to send verification code");
+    throw new Error(err.detail || "Failed to send verification code. Please wait before retrying.");
   }
   return await res.json();
 }
@@ -92,3 +106,36 @@ export async function fetchTicketStatus(ticketId: string): Promise<ApiQueueStatu
   return await res.json();
 }
 
+// ── Staff Operator Functions ──
+
+export async function fetchStaffQueue(serviceId: string): Promise<StaffQueueState> {
+  const res = await fetch(`${API_BASE}/staff/queue/${serviceId}`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Failed to load staff queue");
+  return await res.json();
+}
+
+export async function callNextTicket(serviceId: string, deskName: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/staff/call-next`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ service_id: serviceId, desk_name: deskName }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Could not call next ticket");
+  }
+  return await res.json();
+}
+
+export async function updateTicketStatus(ticketId: string, status: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/staff/update-status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ticket_id: ticketId, status }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to update ticket status");
+  }
+  return await res.json();
+}

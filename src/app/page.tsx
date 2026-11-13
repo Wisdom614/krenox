@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useState } from "react";
 import JoinQueueDialog from "@/components/JoinQueueDialog";
 import { Button, Logo } from "@/components/ui";
@@ -74,13 +75,12 @@ export default function Home() {
             <a className="hidden transition hover:text-white md:block" href="#how-it-works">
               How it works
             </a>
-            <Button
-              variant="secondary"
-              className="!border-white/30 !bg-white/10 !px-5 !py-2.5 !text-white backdrop-blur hover:!bg-white/20"
-              title="Staff console preview"
+            <Link
+              href="/staff"
+              className="inline-flex items-center justify-center rounded-full border border-white/30 bg-white/10 px-5 py-2.5 text-sm font-bold text-white backdrop-blur transition hover:bg-white/20"
             >
-              Staff sign in
-            </Button>
+              Staff console
+            </Link>
           </div>
         </nav>
 

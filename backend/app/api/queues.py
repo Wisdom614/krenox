@@ -1,15 +1,16 @@
 import random
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 from app.core.supabase import supabase_client
+from app.core.security import limiter
 from app.models.schemas import JoinQueueRequest, TicketResponse, QueueStatusResponse
 from app.services.whatsapp import whatsapp_service
 
 router = APIRouter(prefix="/queues", tags=["queues"])
 
-# In-memory store for OTPs (or store in Supabase table)
+# In-memory store for OTPs
 OTP_STORE: dict[str, str] = {}
 
 class RequestOtpPayload(BaseModel):
@@ -20,8 +21,9 @@ class VerifyOtpPayload(BaseModel):
     code: str
 
 @router.post("/whatsapp/send-otp")
-async def send_whatsapp_otp(payload: RequestOtpPayload):
-    """Sends a 6-digit verification code to the user's WhatsApp number."""
+@limiter.limit("5/minute")
+async def send_whatsapp_otp(request: Request, payload: RequestOtpPayload):
+    """Sends a 6-digit verification code to the user's WhatsApp number. Rate limited to 5/min per IP."""
     phone = payload.phone.strip()
     if len(phone) < 8:
         raise HTTPException(status_code=400, detail="Invalid phone number format")
