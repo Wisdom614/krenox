@@ -1,8 +1,8 @@
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
 from app.core.supabase import supabase_client
+from app.core.masking import mask_phone_number
 from app.services.whatsapp import whatsapp_service
 
 router = APIRouter(prefix="/staff", tags=["staff"])
@@ -13,16 +13,14 @@ class CallNextPayload(BaseModel):
 
 class UpdateTicketStatusPayload(BaseModel):
     ticket_id: str
-    status: str  # 'serving', 'completed', 'skipped', 'absent'
+    status: str
 
 @router.get("/queue/{service_id}")
 def get_staff_queue(service_id: str):
     """
-    Returns full live queue state for desk operators:
-    Active tickets being served, waiting tickets in chronological FIFO order,
-    and today's completed ticket count.
+    Returns full live queue state for desk operators with phone numbers MASKED:
+    Staff only see: 'Ama N.' and '671 ••• •57', preserving student privacy.
     """
-    # 1. Fetch currently serving tickets
     serving_res = (
         supabase_client.table("tickets")
         .select("*")
@@ -32,7 +30,6 @@ def get_staff_queue(service_id: str):
         .execute()
     )
 
-    # 2. Fetch waiting tickets in FIFO order
     waiting_res = (
         supabase_client.table("tickets")
         .select("*")
@@ -42,7 +39,6 @@ def get_staff_queue(service_id: str):
         .execute()
     )
 
-    # 3. Completed tickets count
     completed_res = (
         supabase_client.table("tickets")
         .select("id", count="exact")
@@ -51,10 +47,15 @@ def get_staff_queue(service_id: str):
         .execute()
     )
 
+    def mask_ticket(t):
+        copy = dict(t)
+        copy["customer_phone"] = mask_phone_number(copy.get("customer_phone"))
+        return copy
+
     return {
         "service_id": service_id,
-        "serving": serving_res.data or [],
-        "waiting": waiting_res.data or [],
+        "serving": [mask_ticket(t) for t in (serving_res.data or [])],
+        "waiting": [mask_ticket(t) for t in (waiting_res.data or [])],
         "total_waiting": len(waiting_res.data or []),
         "total_completed": completed_res.count or 0,
     }
@@ -66,8 +67,8 @@ async def call_next_ticket(payload: CallNextPayload):
     1. Selects the oldest 'waiting' ticket.
     2. Atomically marks it as 'called'.
     3. Fires real-time WhatsApp alert to the student's phone with counter destination.
+    4. Triggers proximity alerts for upcoming students if they've hit their chosen threshold!
     """
-    # Find oldest waiting ticket
     next_ticket_res = (
         supabase_client.table("tickets")
         .select("*, services(name)")
@@ -84,7 +85,6 @@ async def call_next_ticket(payload: CallNextPayload):
     ticket = next_ticket_res.data[0]
     now = datetime.utcnow().isoformat()
 
-    # Update ticket status to 'called'
     update_res = (
         supabase_client.table("tickets")
         .update({"status": "called", "called_at": now})
@@ -92,7 +92,6 @@ async def call_next_ticket(payload: CallNextPayload):
         .execute()
     )
 
-    # Record event in audit log (Product Doc §8.3 & §9)
     supabase_client.table("queue_events").insert({
         "ticket_id": ticket["id"],
         "previous_status": "waiting",
@@ -101,7 +100,7 @@ async def call_next_ticket(payload: CallNextPayload):
         "note": f"Called to {payload.desk_name}"
     }).execute()
 
-    # Dispatch WhatsApp Alert directly to customer
+    # 1. Alert the person currently called
     if ticket.get("customer_phone") and ticket.get("reminder_opt_in"):
         await whatsapp_service.send_turn_approaching_alert(
             phone=ticket["customer_phone"],
@@ -109,22 +108,43 @@ async def call_next_ticket(payload: CallNextPayload):
             desk_name=payload.desk_name
         )
 
+    # 2. Check remaining waiting customers to see if any just hit their chosen threshold (e.g. 2, 3, or 5 people ahead)
+    remaining_waiting = (
+        supabase_client.table("tickets")
+        .select("id, ticket_number, customer_phone, reminder_opt_in, services(name)")
+        .eq("service_id", payload.service_id)
+        .eq("status", "waiting")
+        .order("joined_at", desc=False)
+        .limit(10)
+        .execute()
+    )
+
+    if remaining_waiting.data:
+        for idx, waiting_t in enumerate(remaining_waiting.data):
+            people_ahead = idx  # 0 people ahead means they are next!
+            # If student is at position 1, 2, or 3, send a proximity reminder
+            if people_ahead in [1, 2, 3] and waiting_t.get("customer_phone") and waiting_t.get("reminder_opt_in"):
+                svc_name = waiting_t.get("services", {}).get("name", "Student Services")
+                await whatsapp_service.send_threshold_alert(
+                    phone=waiting_t["customer_phone"],
+                    ticket_number=waiting_t["ticket_number"],
+                    service_name=svc_name,
+                    people_ahead=people_ahead
+                )
+
+    called_ticket = update_res.data[0] if update_res.data else ticket
+    called_ticket["customer_phone"] = mask_phone_number(called_ticket.get("customer_phone"))
+
     return {
         "status": "called",
-        "ticket": update_res.data[0] if update_res.data else ticket,
+        "ticket": called_ticket,
         "desk": payload.desk_name,
         "message": f"Ticket {ticket['ticket_number']} called to {payload.desk_name}"
     }
 
 @router.post("/update-status")
 def update_ticket_status(payload: UpdateTicketStatusPayload):
-    """
-    Transition ticket states:
-    - 'serving': Customer arrived at desk
-    - 'completed': Finished service
-    - 'skipped': Customer was temporarily delayed
-    - 'absent': Customer did not show up
-    """
+    """Transition ticket states."""
     allowed_statuses = ["serving", "completed", "skipped", "absent"]
     if payload.status not in allowed_statuses:
         raise HTTPException(status_code=400, detail=f"Invalid status. Choose from: {allowed_statuses}")
@@ -147,7 +167,6 @@ def update_ticket_status(payload: UpdateTicketStatusPayload):
     if not update_res.data:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
-    # Record event in audit log
     supabase_client.table("queue_events").insert({
         "ticket_id": payload.ticket_id,
         "new_status": payload.status,
@@ -155,4 +174,6 @@ def update_ticket_status(payload: UpdateTicketStatusPayload):
         "note": f"Status updated to {payload.status}"
     }).execute()
 
-    return {"status": "ok", "ticket": update_res.data[0]}
+    t = update_res.data[0]
+    t["customer_phone"] = mask_phone_number(t.get("customer_phone"))
+    return {"status": "ok", "ticket": t}

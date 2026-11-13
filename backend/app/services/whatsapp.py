@@ -25,15 +25,11 @@ class WhatsAppNotificationService:
         self.session_id = session_id or settings.WA_SESSION_ID
 
     def _format_jid(self, phone: str) -> str:
-        # Strip '+', spaces, dashes, parentheses
         digits = "".join(filter(str.isdigit, phone))
-        
-        # If user entered local 9-digit Cameroonian number without country code (e.g. 671657357)
         if len(digits) == 9 and digits.startswith("6"):
             digits = f"237{digits}"
         elif len(digits) == 8 and digits.startswith("2"):
             digits = f"237{digits}"
-
         return f"{digits}@s.whatsapp.net"
 
     async def send_verification_otp(self, phone: str, otp_code: str) -> bool:
@@ -52,6 +48,7 @@ class WhatsAppNotificationService:
         position: int,
         est_wait: int,
         pin: str,
+        notify_threshold: int = 2,
     ) -> bool:
         message = (
             f"🎟️ *Krenox Virtual Ticket Confirmed*\n\n"
@@ -60,7 +57,17 @@ class WhatsAppNotificationService:
             f"• Live Position: *#{position}*\n"
             f"• Est. Wait: *~{est_wait} minutes*\n"
             f"• Recovery PIN: *{pin}*\n\n"
-            f"Keep your phone handy. We will alert you when you are near the front!"
+            f"🔔 *Smart Alert*: We will ping you when only *{notify_threshold} people* are left ahead of you!"
+        )
+        return await self.send_text(phone, message)
+
+    async def send_threshold_alert(
+        self, phone: str, ticket_number: str, service_name: str, people_ahead: int
+    ) -> bool:
+        message = (
+            f"⏳ *HEADS UP: YOUR TURN IS APPROACHING!*\n\n"
+            f"There {'is' if people_ahead == 1 else 'are'} only *{people_ahead} {'person' if people_ahead == 1 else 'people'}* ahead of your ticket *{ticket_number}* for *{service_name}*.\n\n"
+            f"Please begin heading towards the service area now so you don't miss your call."
         )
         return await self.send_text(phone, message)
 

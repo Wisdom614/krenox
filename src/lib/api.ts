@@ -16,6 +16,7 @@ export type ApiTicket = {
   pin: string;
   customer_name: string;
   customer_phone?: string;
+  masked_phone?: string;
   status: string;
   joined_at: string;
   called_at?: string;
@@ -23,6 +24,7 @@ export type ApiTicket = {
   completed_at?: string;
   position?: number;
   estimated_wait_minutes?: number;
+  notify_threshold?: number;
 };
 
 export type ApiQueueStatus = {
@@ -84,6 +86,7 @@ export async function joinBackendQueue(payload: {
   customer_name: string;
   customer_phone?: string;
   reminder_opt_in: boolean;
+  notify_threshold?: number;
 }): Promise<ApiTicket> {
   const res = await fetch(`${API_BASE}/queues/join`, {
     method: "POST",

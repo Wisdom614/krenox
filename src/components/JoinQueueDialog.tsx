@@ -20,6 +20,7 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [reminder, setReminder] = useState(true);
+  const [notifyThreshold, setNotifyThreshold] = useState<number>(2); // Alert when X people left ahead
   
   // WhatsApp OTP verification states
   const [otpSent, setOtpSent] = useState(false);
@@ -36,7 +37,6 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
     fetchServices().then((svcs) => {
       if (svcs && svcs.length > 0) {
         setBackendServices(svcs);
-        // If current serviceId is not in backend list, map to first match
         if (!svcs.some((s) => s.id === serviceId)) {
           setServiceId(svcs[0].id);
         }
@@ -98,28 +98,26 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
 
     setIsJoining(true);
     try {
-      // Connect to FastAPI + Supabase backend
       const registered = await joinBackendQueue({
         service_id: service.id,
         customer_name: name.trim(),
         customer_phone: reminder ? phone.trim() : undefined,
         reminder_opt_in: reminder,
+        notify_threshold: notifyThreshold,
       });
 
-      // Persist in local storage for instant sync across tabs
       saveTicket({
         ticket: registered.ticket_number,
         pin: registered.pin,
         serviceId: registered.service_id,
         name: registered.customer_name,
-        phone: reminder ? phone.trim() : "",
+        phone: registered.masked_phone || "",
         reminder,
         joinedAt: new Date(registered.joined_at).getTime(),
       });
 
       router.push(`/waiting?ticketId=${registered.id}`);
     } catch (err: unknown) {
-      console.error("Backend error, falling back to local simulation:", err);
       const msg = err instanceof Error ? err.message : "Registration failed";
       setGeneralError(msg);
       setIsJoining(false);
@@ -233,7 +231,13 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
               </label>
             </div>
 
-            {/* WhatsApp Verification Widget */}
+            {/* Privacy Shield Notice */}
+            <div className="mt-3 flex items-center gap-2 rounded-xl bg-[#f0f7f5] px-3.5 py-2 text-xs text-brand-ink">
+              <span>🛡️</span>
+              <span><strong>Privacy Protected:</strong> Your phone number is strictly encrypted and never exposed to staff or on public displays.</span>
+            </div>
+
+            {/* WhatsApp Verification & Proximity Settings */}
             <div className="mt-4 rounded-2xl border border-line bg-[#f8faf9] p-4">
               <div className="flex items-start justify-between gap-3">
                 <label className="flex cursor-pointer items-start gap-3">
@@ -245,10 +249,10 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
                   />
                   <div>
                     <span className="block text-sm font-bold text-ink">
-                      Send WhatsApp Ticket & Alerts
+                      Send WhatsApp Ticket & Smart Alert
                     </span>
                     <span className="block text-xs leading-relaxed text-soft">
-                      Receive your digital ticket via WhatsApp and get pinged when your turn is close.
+                      Receive an instant confirmation ticket and a heads-up alert before your turn.
                     </span>
                   </div>
                 </label>
@@ -277,7 +281,7 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
               {reminder && otpSent && !isPhoneVerified && (
                 <div className="mt-4 border-t border-line/60 pt-3">
                   <p className="text-xs font-medium text-ink">
-                    Enter the 6-digit WhatsApp code sent to {phone}:
+                    Enter the 6-digit WhatsApp code sent to your phone:
                   </p>
                   <div className="mt-2 flex gap-2">
                     <input
@@ -299,13 +303,33 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
                 </div>
               )}
 
+              {/* Threshold Selection (Custom "Notify me when X people left") */}
+              {reminder && isPhoneVerified && (
+                <div className="mt-4 border-t border-line/60 pt-3">
+                  <label htmlFor="threshold-select" className="block text-xs font-bold text-ink mb-1.5">
+                    When should we alert you before your turn?
+                  </label>
+                  <select
+                    id="threshold-select"
+                    value={notifyThreshold}
+                    onChange={(e) => setNotifyThreshold(Number(e.target.value))}
+                    className="w-full rounded-xl border border-line-strong bg-white px-3 py-2 text-xs font-semibold text-ink outline-none focus:border-brand"
+                  >
+                    <option value={1}>When 1 person is left ahead (You are next)</option>
+                    <option value={2}>When 2 people are left ahead (~5 mins away)</option>
+                    <option value={3}>When 3 people are left ahead (~10 mins away)</option>
+                    <option value={5}>When 5 people are left ahead (~15 mins away)</option>
+                  </select>
+                </div>
+              )}
+
               {otpError && (
                 <p className="mt-2 text-xs font-medium text-danger">{otpError}</p>
               )}
             </div>
 
             {generalError && (
-              <div className="mt-4 rounded-xl bg-[#fde8e8] p-3 text-xs font-medium text-danger">
+              <div className="mt-4 rounded-xl bg-[#fde8e8] p-3 text-xs font-medium text-danger border border-danger/20">
                 {generalError}
               </div>
             )}
