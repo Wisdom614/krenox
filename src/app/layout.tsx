@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   description: "Take a ticket on your phone, follow your place in line, and arrive when it is nearly your turn.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" data-scroll-behavior="smooth" className={`${display.variable} ${body.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">{children}</body>

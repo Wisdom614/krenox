@@ -112,3 +112,4 @@ def toggle_desk(payload: ToggleDeskPayload):
         raise HTTPException(status_code=404, detail="Desk not found")
 
     return {"status": "ok", "desk": update_res.data[0]}
+
