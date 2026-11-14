@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from app.core.supabase import supabase_client
 from app.core.auth import require_role, AuthenticatedUser
+from app.services.organisations import org_workflow_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -67,7 +68,17 @@ def create_service(
     payload: CreateServicePayload,
     user: AuthenticatedUser = Depends(require_role(["admin"]))
 ):
-    """Add a new queue service to a facility."""
+    """Add a new queue service to a facility (Organisation must be APPROVED)."""
+    fac_res = supabase_client.table("facilities").select("id, organisation_id").eq("id", payload.facility_id).single().execute()
+    if not fac_res.data:
+        raise HTTPException(status_code=404, detail="Facility not found")
+    org_id = fac_res.data["organisation_id"]
+    if not org_workflow_service.is_organisation_approved(org_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Organisation is not approved for live queue operations. Status must be APPROVED."
+        )
+
     insert_res = supabase_client.table("services").insert({
         "facility_id": payload.facility_id,
         "name": payload.name.strip(),
@@ -101,7 +112,17 @@ def create_desk(
     payload: CreateDeskPayload,
     user: AuthenticatedUser = Depends(require_role(["admin"]))
 ):
-    """Add a new service counter."""
+    """Add a new service counter (Organisation must be APPROVED)."""
+    fac_res = supabase_client.table("facilities").select("id, organisation_id").eq("id", payload.facility_id).single().execute()
+    if not fac_res.data:
+        raise HTTPException(status_code=404, detail="Facility not found")
+    org_id = fac_res.data["organisation_id"]
+    if not org_workflow_service.is_organisation_approved(org_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Organisation is not approved for live queue operations. Status must be APPROVED."
+        )
+
     insert_res = supabase_client.table("service_desks").insert({
         "facility_id": payload.facility_id,
         "name": payload.name.strip(),

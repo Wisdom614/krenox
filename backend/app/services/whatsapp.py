@@ -80,6 +80,9 @@ class WhatsAppNotificationService:
         )
         return await self.send_text(phone, message)
 
+    async def send_whatsapp_message(self, phone: str, text: str) -> bool:
+        return await self.send_text(phone, text)
+
     async def send_text(self, phone: str, text: str) -> bool:
         jid = self._format_jid(phone)
         url = f"{self.base_url}/api/messages/{self.session_id}/{jid}/send"

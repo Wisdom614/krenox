@@ -49,19 +49,19 @@ function LoginForm() {
 
   return (
     <div className="w-full max-w-md rounded-3xl bg-white p-8 sm:p-10 shadow-xl border border-line-strong text-ink">
-      {/* Institutional Seal & Header */}
-      <div className="text-center mb-8">
-        <div className="mx-auto w-14 h-14 rounded-2xl bg-brand text-white flex items-center justify-center font-black text-xl shadow-md mb-3">
-          UB
+      {/* Platform Portal Header */}
+      <div className="text-center mb-8 flex flex-col items-center">
+        <div className="mb-4">
+          <Logo size="lg" variant="dark" />
         </div>
-        <span className="text-[11px] font-bold uppercase tracking-widest text-brand">
-          University of Buea
+        <span className="text-[11px] font-bold uppercase tracking-widest text-forest">
+          Platform Operations
         </span>
-        <h1 className="text-2xl font-extrabold text-ink tracking-tight mt-1">
+        <h1 className="text-2xl font-black text-ink tracking-tight mt-1">
           Staff & Admin Portal
         </h1>
-        <p className="text-xs text-soft mt-1">
-          Sign in to operate service desks or manage campus virtual queues.
+        <p className="text-xs text-soft mt-1 max-w-xs mx-auto">
+          Sign in to operate assigned service counters or manage organisation queues.
         </p>
       </div>
 
@@ -149,12 +149,33 @@ function LoginForm() {
         </div>
       </div>
 
-      <div className="mt-6 text-center">
+      <div className="mt-6 pt-4 border-t border-line text-center space-y-2">
+        <p className="text-xs text-soft">
+          Need virtual queue management for your organisation?
+        </p>
+        <div className="flex items-center justify-center gap-3">
+          <Link
+            href="/register-organisation"
+            className="text-xs font-bold text-forest hover:text-forest-dark transition underline underline-offset-4"
+          >
+            Register an Organisation →
+          </Link>
+          <span className="text-soft text-xs">•</span>
+          <Link
+            href="/register-organisation/status"
+            className="text-xs font-semibold text-soft hover:text-ink transition underline underline-offset-4"
+          >
+            Track Application
+          </Link>
+        </div>
+      </div>
+
+      <div className="mt-4 text-center">
         <Link
           href="/"
           className="text-xs font-semibold text-soft hover:text-ink transition underline underline-offset-4"
         >
-          ← Return to Public Student Home
+          ← Return to Public Queue Home
         </Link>
       </div>
     </div>
@@ -165,7 +186,7 @@ export default function LoginPage() {
   return (
     <main className="min-h-screen bg-[#f3f6f5] flex flex-col justify-between p-6">
       <header className="max-w-7xl mx-auto w-full flex items-center justify-between py-2">
-        <Logo />
+        <Logo size="md" variant="dark" />
         <Link
           href="/"
           className="text-xs font-semibold text-soft hover:text-ink transition underline underline-offset-4"
@@ -186,3 +207,4 @@ export default function LoginPage() {
     </main>
   );
 }
+

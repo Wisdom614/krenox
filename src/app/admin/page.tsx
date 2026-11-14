@@ -12,9 +12,15 @@ import {
   toggleDeskOpen,
   createService,
   createDesk,
+  fetchAdminOrganisationApplications,
+  reviewOrganisationApplication,
+  fetchOrganisationAuditTrail,
+  regenerateSetupToken,
   AdminOverview,
   ApiService,
   AdminDesk,
+  OrganisationApplication,
+  OrganisationAuditEntry,
 } from "@/lib/api";
 
 export default function AdminPage() {
@@ -24,9 +30,32 @@ export default function AdminPage() {
   const [data, setData] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"services" | "desks" | "posters">("services");
+  const [activeTab, setActiveTab] = useState<"services" | "desks" | "posters" | "organisations" | "audit">("services");
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [actionPending, setActionPending] = useState<string | null>(null);
+
+  // Organisation Approval Workflow State
+  const [orgApplications, setOrgApplications] = useState<OrganisationApplication[]>([]);
+  const [auditLogs, setAuditLogs] = useState<OrganisationAuditEntry[]>([]);
+  const [loadingOrgs, setLoadingOrgs] = useState<boolean>(false);
+  const [orgFilter, setOrgFilter] = useState<string>("ALL");
+  const [reviewModal, setReviewModal] = useState<{
+    isOpen: boolean;
+    app: OrganisationApplication | null;
+    action: "approve" | "reject" | "request_info" | "suspend";
+    reason: string;
+    facilityName: string;
+    submitting: boolean;
+    error: string | null;
+  }>({
+    isOpen: false,
+    app: null,
+    action: "approve",
+    reason: "",
+    facilityName: "Main Facility",
+    submitting: false,
+    error: null,
+  });
 
   // Route Guard: enforce admin authorization
   useEffect(() => {
@@ -88,6 +117,52 @@ export default function AdminPage() {
     }
   }, [user, role]);
 
+  const loadOrganisations = useCallback(async () => {
+    if (!user || role !== "admin") return;
+    setLoadingOrgs(true);
+    try {
+      const [apps, logs] = await Promise.all([
+        fetchAdminOrganisationApplications(),
+        fetchOrganisationAuditTrail(),
+      ]);
+      setOrgApplications(apps);
+      setAuditLogs(logs);
+    } catch (e) {
+      console.error("Failed to load organisation workflow data:", e);
+    } finally {
+      setLoadingOrgs(false);
+    }
+  }, [user, role]);
+
+  useEffect(() => {
+    if (user && role === "admin") {
+      loadOrganisations();
+    }
+  }, [user, role, loadOrganisations]);
+
+  async function handleReviewSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!reviewModal.app) return;
+    if (reviewModal.action !== "approve" && !reviewModal.reason.trim()) {
+      setReviewModal((m) => ({ ...m, error: "A detailed explanation/reason is required." }));
+      return;
+    }
+    setReviewModal((m) => ({ ...m, submitting: true, error: null }));
+    try {
+      await reviewOrganisationApplication(reviewModal.app.id, {
+        action: reviewModal.action,
+        reason: reviewModal.reason.trim() || undefined,
+        initial_facility_name: reviewModal.action === "approve" ? reviewModal.facilityName : undefined,
+      });
+      setReviewModal((m) => ({ ...m, isOpen: false, submitting: false }));
+      await loadOrganisations();
+      await loadOverview();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Review operation failed";
+      setReviewModal((m) => ({ ...m, submitting: false, error: msg }));
+    }
+  }
+
   useEffect(() => {
     let active = true;
     if (user && role === "admin") {
@@ -113,14 +188,19 @@ export default function AdminPage() {
     };
   }, [user, role]);
 
-  // Generate QR Code whenever selected service or baseUrl changes
+  // Generate QR Code pointing directly to tenant customer dispatch: /q/[orgSlug]
   useEffect(() => {
     let active = true;
     if (!baseUrl) return;
 
-    let targetUrl = baseUrl;
+    const orgSlug =
+      (user?.user_metadata?.organisation_slug as string) ||
+      data?.services[0]?.facilities?.organisations?.slug ||
+      "ubuea";
+
+    let targetUrl = `${baseUrl}/q/${orgSlug}`;
     if (selectedServiceForPoster !== "all") {
-      targetUrl = `${baseUrl}/?serviceId=${selectedServiceForPoster}`;
+      targetUrl = `${baseUrl}/q/${orgSlug}?serviceId=${selectedServiceForPoster}`;
     }
 
     QRCode.toDataURL(targetUrl, {
@@ -253,13 +333,15 @@ export default function AdminPage() {
       {/* ── Top Bar ── */}
       <header className="border-b border-line/70 bg-white sticky top-0 z-30 shadow-xs no-print">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-4">
-            <Logo />
-            <span className="rounded-full bg-ink px-3 py-1 text-xs font-bold text-white">
+          <div className="flex items-center gap-3">
+            <Logo size="md" variant="dark" />
+            <span className="text-soft hidden sm:inline">/</span>
+            <span className="text-xs font-bold text-ink hidden sm:inline">
               Admin Console
             </span>
+            <span className="text-soft hidden sm:inline">·</span>
             <span className="text-xs font-medium text-soft hidden sm:inline">
-              University of Buea
+              {(user?.user_metadata?.institution_name as string) || (user?.user_metadata?.organisation_name as string) || "System Administrator"}
             </span>
           </div>
 
@@ -284,6 +366,13 @@ export default function AdminPage() {
               </svg>
               <span className="hidden sm:inline">Refresh</span>
             </button>
+
+            <Link
+              href="/tenant-admin"
+              className="text-xs font-bold text-brand hover:underline transition"
+            >
+              Organisation Workspace →
+            </Link>
 
             <Link
               href="/staff"
@@ -480,6 +569,39 @@ export default function AdminPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
             </svg>
             <span>QR Code Posters</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("organisations")}
+            className={`px-5 py-3 text-sm font-bold border-b-2 transition-all flex items-center gap-2 ${
+              activeTab === "organisations"
+                ? "border-brand text-brand bg-white rounded-t-xl"
+                : "border-transparent text-soft hover:text-ink"
+            }`}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+            </svg>
+            <span>Organisation Approvals</span>
+            {orgApplications.filter((a) => a.status === "PENDING_REVIEW").length > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-white animate-pulse">
+                {orgApplications.filter((a) => a.status === "PENDING_REVIEW").length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab("audit")}
+            className={`px-5 py-3 text-sm font-bold border-b-2 transition-all flex items-center gap-2 ${
+              activeTab === "audit"
+                ? "border-brand text-brand bg-white rounded-t-xl"
+                : "border-transparent text-soft hover:text-ink"
+            }`}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <span>Audit Trail</span>
           </button>
         </div>
 
@@ -785,6 +907,517 @@ export default function AdminPage() {
             </div>
           </div>
         )}
+
+        {/* ── TAB 4: ORGANISATION APPROVALS ── */}
+        {activeTab === "organisations" && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-extrabold text-ink">Organisation Onboarding & Approval Queue</h3>
+                <p className="text-xs text-soft mt-0.5">
+                  Review applicant tenant credentials, verify contact identity, and control operational activation.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={loadOrganisations}
+                  disabled={loadingOrgs}
+                  className="px-3.5 py-2 rounded-xl bg-white border border-line-strong text-ink text-xs font-semibold hover:bg-surface-sunken transition flex items-center gap-1.5 shadow-xs"
+                >
+                  <svg className={`w-3.5 h-3.5 ${loadingOrgs ? "animate-spin text-brand" : "text-soft"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>{loadingOrgs ? "Refreshing..." : "Refresh Queue"}</span>
+                </button>
+                <Link
+                  href="/register-organisation"
+                  target="_blank"
+                  className="px-4 py-2 rounded-xl bg-brand hover:bg-brand-dark text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                  <span>Public Registration Form ↗</span>
+                </Link>
+              </div>
+            </div>
+
+            {/* Metrics Ribbon */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <button
+                onClick={() => setOrgFilter("ALL")}
+                className={`p-4 rounded-2xl border text-left transition-all ${
+                  orgFilter === "ALL"
+                    ? "bg-white border-brand shadow-xs ring-2 ring-brand/10"
+                    : "bg-surface-sunken border-line hover:border-line-strong"
+                }`}
+              >
+                <p className="text-[10px] font-bold uppercase tracking-wider text-soft">Total Applications</p>
+                <p className="text-2xl font-black text-ink font-mono mt-1">{orgApplications.length}</p>
+              </button>
+
+              <button
+                onClick={() => setOrgFilter("PENDING_REVIEW")}
+                className={`p-4 rounded-2xl border text-left transition-all ${
+                  orgFilter === "PENDING_REVIEW"
+                    ? "bg-amber-50/70 border-amber-500 shadow-xs ring-2 ring-amber-500/20"
+                    : "bg-surface-sunken border-line hover:border-line-strong"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Pending Review</p>
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                </div>
+                <p className="text-2xl font-black text-amber-900 font-mono mt-1">
+                  {orgApplications.filter((a) => a.status === "PENDING_REVIEW").length}
+                </p>
+              </button>
+
+              <button
+                onClick={() => setOrgFilter("ACTION_REQUIRED")}
+                className={`p-4 rounded-2xl border text-left transition-all ${
+                  orgFilter === "ACTION_REQUIRED"
+                    ? "bg-orange-50/70 border-orange-500 shadow-xs ring-2 ring-orange-500/20"
+                    : "bg-surface-sunken border-line hover:border-line-strong"
+                }`}
+              >
+                <p className="text-[10px] font-bold uppercase tracking-wider text-orange-700">Action Required</p>
+                <p className="text-2xl font-black text-orange-900 font-mono mt-1">
+                  {orgApplications.filter((a) => a.status === "ACTION_REQUIRED").length}
+                </p>
+              </button>
+
+              <button
+                onClick={() => setOrgFilter("APPROVED")}
+                className={`p-4 rounded-2xl border text-left transition-all ${
+                  orgFilter === "APPROVED"
+                    ? "bg-emerald-50/70 border-emerald-500 shadow-xs ring-2 ring-emerald-500/20"
+                    : "bg-surface-sunken border-line hover:border-line-strong"
+                }`}
+              >
+                <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Approved</p>
+                <p className="text-2xl font-black text-emerald-900 font-mono mt-1">
+                  {orgApplications.filter((a) => a.status === "APPROVED").length}
+                </p>
+              </button>
+
+              <button
+                onClick={() => setOrgFilter("REJECTED")}
+                className={`p-4 rounded-2xl border text-left transition-all col-span-2 sm:col-span-1 ${
+                  orgFilter === "REJECTED"
+                    ? "bg-rose-50/70 border-rose-500 shadow-xs ring-2 ring-rose-500/20"
+                    : "bg-surface-sunken border-line hover:border-line-strong"
+                }`}
+              >
+                <p className="text-[10px] font-bold uppercase tracking-wider text-rose-700">Rejected / Suspended</p>
+                <p className="text-2xl font-black text-rose-900 font-mono mt-1">
+                  {orgApplications.filter((a) => a.status === "REJECTED" || a.status === "SUSPENDED").length}
+                </p>
+              </button>
+            </div>
+
+            {/* Application Cards List */}
+            {orgApplications.length === 0 ? (
+              <div className="p-12 text-center bg-white rounded-3xl border border-line-strong">
+                <p className="text-sm font-semibold text-soft">No organisation registration applications found.</p>
+                <p className="text-xs text-soft mt-1">New registrations from the public portal will appear here.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {orgApplications
+                  .filter((app) => {
+                    if (orgFilter === "ALL") return true;
+                    if (orgFilter === "REJECTED") return app.status === "REJECTED" || app.status === "SUSPENDED";
+                    return app.status === orgFilter;
+                  })
+                  .map((app) => {
+                    const isPending = app.status === "PENDING_REVIEW";
+                    const isActionReq = app.status === "ACTION_REQUIRED";
+                    const isApproved = app.status === "APPROVED";
+                    const isSuspended = app.status === "SUSPENDED";
+
+                    return (
+                      <div
+                        key={app.id}
+                        className={`p-6 rounded-3xl bg-white border transition-all shadow-xs ${
+                          isPending
+                            ? "border-amber-300 ring-2 ring-amber-400/20"
+                            : isActionReq
+                            ? "border-orange-300"
+                            : isApproved
+                            ? "border-line-strong"
+                            : "border-rose-200 opacity-90"
+                        }`}
+                      >
+                        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 border-b border-line pb-4 mb-4">
+                          <div className="space-y-1.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h4 className="text-lg font-black text-ink">{app.name}</h4>
+                              <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-mint text-forest border border-mint/40">
+                                {app.category}
+                              </span>
+                              <span className="font-mono text-xs font-bold text-soft px-2 py-0.5 rounded-md bg-surface-sunken border border-line">
+                                {app.registration_ref}
+                              </span>
+                            </div>
+                            <p className="text-xs text-soft">
+                              Submitted: {new Date(app.created_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                              {app.reviewed_at && (
+                                <span className="ml-2">
+                                  • Reviewed: {new Date(app.reviewed_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                                  {app.reviewed_by ? ` by ${app.reviewed_by}` : ""}
+                                </span>
+                              )}
+                            </p>
+                          </div>
+
+                          <div>
+                            <span
+                              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wide border ${
+                                isPending
+                                  ? "bg-amber-100 text-amber-900 border-amber-300"
+                                  : isActionReq
+                                  ? "bg-orange-100 text-orange-900 border-orange-300"
+                                  : isApproved
+                                  ? "bg-emerald-100 text-emerald-900 border-emerald-300"
+                                  : isSuspended
+                                  ? "bg-slate-200 text-slate-800 border-slate-300"
+                                  : "bg-rose-100 text-rose-900 border-rose-300"
+                              }`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                              {app.status.replace("_", " ")}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Details Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs mb-4">
+                          <div className="p-3 rounded-2xl bg-surface-sunken border border-line">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-soft">Contact Person</p>
+                            <p className="font-bold text-ink mt-0.5">{app.contact_name}</p>
+                            <div className="flex items-center gap-1.5 mt-1 text-soft font-mono">
+                              {app.contact_channel === "whatsapp" ? (
+                                <span className="text-emerald-600 font-bold">WhatsApp:</span>
+                              ) : (
+                                <span className="text-brand font-bold">Email:</span>
+                              )}
+                              <span>{app.masked_contact_value || app.contact_value}</span>
+                              {app.contact_verified && (
+                                <span className="text-[10px] text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded font-bold">
+                                  ✓ Verified
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="p-3 rounded-2xl bg-surface-sunken border border-line">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-soft">Operating Location</p>
+                            <p className="font-bold text-ink mt-0.5">{app.location}</p>
+                            <p className="text-[11px] text-soft mt-1">Tenant Slug: <code className="font-mono text-ink">{app.slug}</code></p>
+                          </div>
+
+                          <div className="p-3 rounded-2xl bg-surface-sunken border border-line">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-soft">
+                              {isApproved ? "Account Setup Status" : "Review Response Window"}
+                            </p>
+                            {isApproved ? (
+                              app.is_account_setup ? (
+                                <p className="font-bold text-emerald-700 mt-0.5">
+                                  ✓ Configured ({app.admin_email || "Active"})
+                                </p>
+                              ) : (
+                                <p className="font-bold text-amber-600 mt-0.5">
+                                  Pending Setup (Token Active)
+                                </p>
+                              )
+                            ) : (
+                              <p className="font-bold text-ink mt-0.5">{app.expected_review_window || "Within 1 hour"}</p>
+                            )}
+                            <p className="text-[11px] text-soft mt-1">
+                              {isApproved
+                                ? (app.is_account_setup ? "Credentials active for login" : "Setup link dispatched to applicant")
+                                : "Automated email/WhatsApp notifications"}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Status Notes Callout */}
+                        {app.status_reason && (
+                          <div className="mb-4 p-3.5 rounded-2xl bg-surface-sunken border-l-4 border-l-brand border border-line text-xs">
+                            <p className="font-bold text-ink">Administrative Decision Note:</p>
+                            <p className="text-soft mt-0.5">{app.status_reason}</p>
+                          </div>
+                        )}
+
+                        {app.additional_info && (
+                          <div className="mb-4 p-3.5 rounded-2xl bg-surface-sunken border border-line text-xs">
+                            <p className="font-bold text-ink">Applicant Submitted Details:</p>
+                            <p className="text-soft mt-0.5">{app.additional_info}</p>
+                          </div>
+                        )}
+
+                        {/* Action Buttons */}
+                        <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2 border-t border-line">
+                          {isPending && (
+                            <>
+                              <button
+                                onClick={() =>
+                                  setReviewModal({
+                                    isOpen: true,
+                                    app,
+                                    action: "approve",
+                                    reason: "",
+                                    facilityName: `${app.name} Main Facility`,
+                                    submitting: false,
+                                    error: null,
+                                  })
+                                }
+                                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                                <span>Approve Organisation</span>
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  setReviewModal({
+                                    isOpen: true,
+                                    app,
+                                    action: "request_info",
+                                    reason: "",
+                                    facilityName: "",
+                                    submitting: false,
+                                    error: null,
+                                  })
+                                }
+                                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                </svg>
+                                <span>Request Information</span>
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  setReviewModal({
+                                    isOpen: true,
+                                    app,
+                                    action: "reject",
+                                    reason: "",
+                                    facilityName: "",
+                                    submitting: false,
+                                    error: null,
+                                  })
+                                }
+                                className="px-4 py-2 rounded-xl bg-rose-50 border border-rose-300 text-rose-700 hover:bg-rose-100 font-bold text-xs flex items-center gap-1.5 transition"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                                <span>Reject</span>
+                              </button>
+                            </>
+                          )}
+
+                          {isActionReq && (
+                            <>
+                              <button
+                                onClick={() =>
+                                  setReviewModal({
+                                    isOpen: true,
+                                    app,
+                                    action: "approve",
+                                    reason: "",
+                                    facilityName: `${app.name} Main Facility`,
+                                    submitting: false,
+                                    error: null,
+                                  })
+                                }
+                                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition"
+                              >
+                                <span>Approve Organisation</span>
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  setReviewModal({
+                                    isOpen: true,
+                                    app,
+                                    action: "reject",
+                                    reason: "",
+                                    facilityName: "",
+                                    submitting: false,
+                                    error: null,
+                                  })
+                                }
+                                className="px-4 py-2 rounded-xl bg-rose-50 border border-rose-300 text-rose-700 hover:bg-rose-100 font-bold text-xs transition"
+                              >
+                                <span>Reject</span>
+                              </button>
+                            </>
+                          )}
+
+                          {isApproved && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              {app.setup_url && !app.is_account_setup && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(app.setup_url || "");
+                                    alert("Account Setup Link copied to clipboard!\n\n" + app.setup_url);
+                                  }}
+                                  className="px-3.5 py-2 rounded-xl bg-mint text-forest font-bold text-xs flex items-center gap-1.5 border border-mint/50 hover:bg-[#1affb2] transition shadow-xs"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                                  </svg>
+                                  <span>Copy Setup Link</span>
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    const res = await regenerateSetupToken(app.id);
+                                    await loadOrganisations();
+                                    alert("New setup token generated and link created:\n\n" + res.setup_url);
+                                  } catch (err) {
+                                    alert("Failed to regenerate setup token: " + String(err));
+                                  }
+                                }}
+                                className="px-3 py-2 rounded-xl bg-surface-sunken border border-line-strong text-ink text-xs font-semibold hover:bg-white transition"
+                                title="Regenerate single-use setup link"
+                              >
+                                <span>{app.is_account_setup ? "Regenerate Admin Invite" : "New Setup Token"}</span>
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  setReviewModal({
+                                    isOpen: true,
+                                    app,
+                                    action: "suspend",
+                                    reason: "",
+                                    facilityName: "",
+                                    submitting: false,
+                                    error: null,
+                                  })
+                                }
+                                className="px-3.5 py-2 rounded-xl bg-white border border-rose-300 text-rose-700 hover:bg-rose-50 font-bold text-xs flex items-center gap-1.5 transition"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                </svg>
+                                <span>Suspend Operations</span>
+                              </button>
+                            </div>
+                          )}
+
+                          {isSuspended && (
+                            <button
+                              onClick={() =>
+                                setReviewModal({
+                                  isOpen: true,
+                                  app,
+                                  action: "approve",
+                                  reason: "Re-activated following administrative clearance",
+                                  facilityName: `${app.name} Main Facility`,
+                                  submitting: false,
+                                  error: null,
+                                })
+                              }
+                              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition"
+                            >
+                              <span>Re-Approve Access</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── TAB 5: AUDIT TRAIL ── */}
+        {activeTab === "audit" && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-extrabold text-ink">Administrative & Onboarding Audit Trail</h3>
+                <p className="text-xs text-soft mt-0.5">
+                  Immutable chronological record of onboarding state transitions, actor attributions, and administrative actions.
+                </p>
+              </div>
+              <button
+                onClick={loadOrganisations}
+                disabled={loadingOrgs}
+                className="px-3.5 py-2 rounded-xl bg-white border border-line-strong text-ink text-xs font-semibold hover:bg-surface-sunken transition flex items-center gap-1.5 shadow-xs"
+              >
+                <span>{loadingOrgs ? "Refreshing..." : "Refresh Audit Logs"}</span>
+              </button>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-line-strong overflow-hidden shadow-xs">
+              {auditLogs.length === 0 ? (
+                <div className="p-12 text-center text-xs text-soft">
+                  No governance audit records logged yet.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-surface-sunken border-b border-line text-[11px] font-bold uppercase tracking-wider text-soft">
+                      <tr>
+                        <th className="px-5 py-3.5">Timestamp</th>
+                        <th className="px-5 py-3.5">Reference</th>
+                        <th className="px-5 py-3.5">Action</th>
+                        <th className="px-5 py-3.5">Actor</th>
+                        <th className="px-5 py-3.5">Transition</th>
+                        <th className="px-5 py-3.5">Reason / Note</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line">
+                      {auditLogs.map((log) => (
+                        <tr key={log.id} className="hover:bg-mint/10 transition-colors">
+                          <td className="px-5 py-3.5 font-mono text-soft whitespace-nowrap">
+                            {new Date(log.created_at || log.timestamp || Date.now()).toLocaleString(undefined, { dateStyle: "short", timeStyle: "medium" })}
+                          </td>
+                          <td className="px-5 py-3.5 font-mono font-bold text-brand whitespace-nowrap">
+                            {log.registration_ref}
+                          </td>
+                          <td className="px-5 py-3.5 font-semibold text-ink whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded-md bg-surface-sunken border border-line font-mono text-[11px]">
+                              {log.action}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5 font-medium text-ink whitespace-nowrap">
+                            {log.actor}
+                          </td>
+                          <td className="px-5 py-3.5 whitespace-nowrap">
+                            <span className="font-mono text-[11px]">
+                              <span className="text-soft">{log.previous_status || "—"}</span>
+                              <span className="mx-1.5 text-brand font-bold">→</span>
+                              <span className="font-bold text-ink">{log.new_status}</span>
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5 text-soft max-w-xs truncate">
+                            {log.reason || "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── PRINTABLE POSTER MODAL & PRINT VIEW ── */}
@@ -1045,6 +1678,141 @@ export default function AdminPage() {
                   className="px-5 py-2.5 rounded-full bg-brand hover:bg-brand-dark text-white font-bold text-xs disabled:opacity-50 shadow-sm"
                 >
                   {newDeskSubmitting ? "Creating..." : "Save Counter"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── ORGANISATION REVIEW MODAL ── */}
+      {reviewModal.isOpen && reviewModal.app && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/70 backdrop-blur-xs no-print">
+          <div className="w-full max-w-lg rounded-3xl bg-white border border-line-strong p-6 sm:p-8 shadow-2xl text-ink">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <span className="font-mono text-[10px] font-bold text-soft bg-surface-sunken px-2 py-0.5 rounded border border-line">
+                  {reviewModal.app.registration_ref}
+                </span>
+                <h3 className="font-extrabold text-ink text-lg mt-1">
+                  {reviewModal.action === "approve"
+                    ? "Approve Organisation Registration"
+                    : reviewModal.action === "reject"
+                    ? "Reject Organisation Registration"
+                    : reviewModal.action === "request_info"
+                    ? "Request Additional Information"
+                    : "Suspend Operational Access"}
+                </h3>
+              </div>
+              <button
+                onClick={() => setReviewModal((m) => ({ ...m, isOpen: false }))}
+                className="text-soft hover:text-ink p-1 rounded-lg"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="mb-4 p-3 rounded-2xl bg-surface-sunken border border-line text-xs">
+              <p className="font-bold text-ink">{reviewModal.app.name}</p>
+              <p className="text-soft mt-0.5">
+                Contact: {reviewModal.app.contact_name} ({reviewModal.app.contact_channel}: {reviewModal.app.masked_contact_value || reviewModal.app.contact_value})
+              </p>
+            </div>
+
+            {reviewModal.error && (
+              <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-danger/30 text-danger text-xs font-semibold">
+                {reviewModal.error}
+              </div>
+            )}
+
+            <form onSubmit={handleReviewSubmit} className="space-y-4">
+              {reviewModal.action === "approve" && (
+                <div>
+                  <label className="block text-xs font-bold text-ink mb-1.5 uppercase tracking-wider">
+                    Initial Facility Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={reviewModal.facilityName}
+                    onChange={(e) =>
+                      setReviewModal((m) => ({ ...m, facilityName: e.target.value }))
+                    }
+                    placeholder="e.g. Main Facility or Head Office"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-line-strong text-ink text-xs font-medium focus:border-brand focus:outline-none"
+                  />
+                  <p className="text-[11px] text-soft mt-1">
+                    This facility will be provisioned automatically for the tenant.
+                  </p>
+                  <p className="text-[11px] text-emerald-800 bg-emerald-50/80 p-2.5 rounded-xl border border-emerald-200 mt-2.5 leading-relaxed">
+                    ⚡ <strong>Automated Account Activation:</strong> Krenox will generate a secure one-time setup token and link, allowing the applicant to configure their administrator credentials and access their dashboard.
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-ink mb-1.5 uppercase tracking-wider">
+                  {reviewModal.action === "approve"
+                    ? "Approval Note (Optional)"
+                    : reviewModal.action === "reject"
+                    ? "Mandatory Rejection Reason"
+                    : reviewModal.action === "request_info"
+                    ? "Information Required from Applicant"
+                    : "Mandatory Reason for Suspension"}
+                </label>
+                <textarea
+                  required={reviewModal.action !== "approve"}
+                  rows={3}
+                  value={reviewModal.reason}
+                  onChange={(e) =>
+                    setReviewModal((m) => ({ ...m, reason: e.target.value }))
+                  }
+                  placeholder={
+                    reviewModal.action === "approve"
+                      ? "e.g. Verified official identity documentation."
+                      : reviewModal.action === "reject"
+                      ? "e.g. Incomplete operational credentials or duplicate entry."
+                      : reviewModal.action === "request_info"
+                      ? "e.g. Please provide your business registration certificate or website URL."
+                      : "e.g. Temporary administrative suspension pending compliance check."
+                  }
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-line-strong text-ink text-xs font-medium focus:border-brand focus:outline-none resize-none"
+                />
+                <p className="text-[11px] text-soft mt-1">
+                  This note will be logged in the immutable audit trail and dispatched to the applicant via {reviewModal.app.contact_channel}.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-4 border-t border-line">
+                <button
+                  type="button"
+                  onClick={() => setReviewModal((m) => ({ ...m, isOpen: false }))}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-soft hover:text-ink"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={reviewModal.submitting}
+                  className={`px-5 py-2.5 rounded-full font-bold text-xs disabled:opacity-50 text-white shadow-sm transition ${
+                    reviewModal.action === "approve"
+                      ? "bg-emerald-600 hover:bg-emerald-700"
+                      : reviewModal.action === "request_info"
+                      ? "bg-amber-500 hover:bg-amber-600"
+                      : "bg-rose-600 hover:bg-rose-700"
+                  }`}
+                >
+                  {reviewModal.submitting
+                    ? "Processing..."
+                    : reviewModal.action === "approve"
+                    ? "Confirm Approval"
+                    : reviewModal.action === "request_info"
+                    ? "Send Clarification Request"
+                    : reviewModal.action === "reject"
+                    ? "Confirm Rejection"
+                    : "Confirm Suspension"}
                 </button>
               </div>
             </form>

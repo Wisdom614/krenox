@@ -38,6 +38,10 @@ export type ApiTicket = {
   position?: number;
   estimated_wait_minutes?: number;
   notify_threshold?: number;
+  organisation_name?: string;
+  facility_name?: string;
+  service_name?: string;
+  desk_name?: string;
 };
 
 export type ApiQueueStatus = {
@@ -169,6 +173,56 @@ export async function fetchTicketStatus(ticketId: string): Promise<ApiQueueStatu
   return await res.json();
 }
 
+export async function cancelTicket(
+  ticketId: string,
+  pin?: string,
+  reason?: string
+): Promise<{ status: string; message: string; ticket_id?: string }> {
+  const res = await fetch(`${API_BASE}/queues/ticket/${ticketId}/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pin, reason }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to cancel ticket");
+  }
+  return await res.json();
+}
+
+export async function postponeTicket(
+  ticketId: string,
+  positions: number = 3,
+  pin?: string
+): Promise<{ status: string; message: string; positions_delayed: number }> {
+  const res = await fetch(`${API_BASE}/queues/ticket/${ticketId}/postpone`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ positions, pin }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to delay ticket position");
+  }
+  return await res.json();
+}
+
+export async function recoverTicket(
+  phoneOrTicket: string,
+  pin: string
+): Promise<{ status: string; ticket_id: string; ticket_number: string; ticket_status: string; redirect_url: string }> {
+  const res = await fetch(`${API_BASE}/queues/recover`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone_or_ticket: phoneOrTicket, pin }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "No active ticket found with these credentials");
+  }
+  return await res.json();
+}
+
 // ── Staff Operator Functions ──
 
 export async function fetchStaffQueue(serviceId: string): Promise<StaffQueueState> {
@@ -183,11 +237,19 @@ export async function fetchStaffQueue(serviceId: string): Promise<StaffQueueStat
   return await res.json();
 }
 
-export async function callNextTicket(serviceId: string, deskName: string): Promise<{ status: string; ticket: ApiTicket; desk: string; message: string }> {
+export async function callNextTicket(
+  serviceId: string,
+  deskName: string,
+  deskId?: string
+): Promise<{ status: string; ticket: ApiTicket; desk: string; message: string }> {
   const res = await fetch(`${API_BASE}/staff/call-next`, {
     method: "POST",
     headers: getAuthHeaders(),
-    body: JSON.stringify({ service_id: serviceId, desk_name: deskName }),
+    body: JSON.stringify({
+      service_id: serviceId,
+      desk_name: deskName,
+      desk_id: deskId || undefined,
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -205,6 +267,71 @@ export async function updateTicketStatus(ticketId: string, status: string): Prom
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Failed to update ticket status");
+  }
+  return await res.json();
+}
+
+export async function fetchStaffDesks(facilityId?: string): Promise<AdminDesk[]> {
+  const url = facilityId ? `${API_BASE}/staff/desks?facility_id=${facilityId}` : `${API_BASE}/staff/desks`;
+  const res = await fetch(url, {
+    cache: "no-store",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to load desks");
+  }
+  return await res.json();
+}
+
+export async function toggleStaffDesk(deskId: string): Promise<{ status: string; is_open: boolean; desk: AdminDesk }> {
+  const res = await fetch(`${API_BASE}/staff/desks/${deskId}/toggle`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to toggle desk state");
+  }
+  return await res.json();
+}
+
+export async function transferTicket(
+  ticketId: string,
+  targetServiceId: string,
+  reason?: string,
+  priority: "normal" | "urgent" = "normal",
+  targetDeskId?: string
+): Promise<{ status: string; message: string; ticket: ApiTicket }> {
+  const res = await fetch(`${API_BASE}/staff/ticket/${ticketId}/transfer`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({
+      target_service_id: targetServiceId,
+      target_desk_id: targetDeskId || undefined,
+      reason: reason || undefined,
+      priority,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to transfer ticket");
+  }
+  return await res.json();
+}
+
+export async function recallTicket(
+  ticketId: string,
+  deskName: string
+): Promise<{ status: string; message: string; ticket: ApiTicket }> {
+  const res = await fetch(`${API_BASE}/staff/ticket/${ticketId}/recall`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ desk_name: deskName }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to recall ticket");
   }
   return await res.json();
 }
@@ -301,6 +428,425 @@ export async function createDesk(payload: {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Failed to create desk");
+  }
+  return await res.json();
+}
+
+
+// ── Organisation Approval & Onboarding Workflow APIs ──
+
+export type OrganisationApplication = {
+  id: string;
+  registration_ref: string;
+  name: string;
+  slug: string;
+  category: string;
+  contact_name: string;
+  contact_channel: "email" | "whatsapp";
+  contact_value: string;
+  masked_contact_value?: string;
+  masked_contact?: string;
+  contact_verified: boolean;
+  location: string;
+  status: "DRAFT" | "PENDING_VERIFICATION" | "PENDING_REVIEW" | "ACTION_REQUIRED" | "APPROVED" | "REJECTED" | "SUSPENDED";
+  status_reason?: string;
+  additional_info?: string;
+  created_at: string;
+  reviewed_at?: string;
+  reviewed_by?: string;
+  expected_review_within?: string;
+  expected_review_window?: string;
+  setup_url?: string;
+  setup_token?: string;
+  setup_token_expires_at?: string;
+  is_account_setup?: boolean;
+  admin_email?: string;
+  organisation_name?: string;
+  message?: string;
+};
+
+export type OrganisationAuditEntry = {
+  id: string;
+  registration_ref: string;
+  action: string;
+  actor: string;
+  previous_status?: string;
+  new_status?: string;
+  details?: string;
+  reason?: string;
+  timestamp?: string;
+  created_at?: string;
+};
+
+export async function registerOrganisation(payload: {
+  name: string;
+  category: string;
+  contact_name: string;
+  contact_channel: "email" | "whatsapp";
+  contact_value: string;
+  location: string;
+  additional_info?: string;
+}): Promise<OrganisationApplication> {
+  const res = await fetch(`${API_BASE}/organisations/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Registration submission failed");
+  }
+  return await res.json();
+}
+
+export async function verifyOrganisationContact(payload: {
+  registration_ref: string;
+  code: string;
+}): Promise<OrganisationApplication> {
+  const res = await fetch(`${API_BASE}/organisations/verify-contact`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Verification failed");
+  }
+  return await res.json();
+}
+
+export async function fetchOrganisationStatus(reference: string): Promise<OrganisationApplication> {
+  const res = await fetch(`${API_BASE}/organisations/status/${encodeURIComponent(reference)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Application not found");
+  }
+  return await res.json();
+}
+
+export async function resubmitOrganisationApplication(
+  reference: string,
+  payload: { additional_info: string }
+): Promise<OrganisationApplication> {
+  const res = await fetch(`${API_BASE}/organisations/resubmit/${encodeURIComponent(reference)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Resubmission failed");
+  }
+  return await res.json();
+}
+
+export async function fetchAdminOrganisationApplications(): Promise<OrganisationApplication[]> {
+  const res = await fetch(`${API_BASE}/organisations/admin/applications`, {
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to load organisation applications");
+  }
+  return await res.json();
+}
+
+export async function reviewOrganisationApplication(
+  orgId: string,
+  payload: {
+    action: "approve" | "reject" | "request_info" | "suspend";
+    reason?: string;
+    initial_facility_name?: string;
+  }
+): Promise<{ status: string; action: string; new_status: string; setup_url?: string; setup_token?: string }> {
+  const res = await fetch(`${API_BASE}/organisations/admin/${orgId}/review`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Review action failed");
+  }
+  return await res.json();
+}
+
+export async function fetchOrganisationAuditTrail(ref?: string): Promise<OrganisationAuditEntry[]> {
+  const url = ref
+    ? `${API_BASE}/organisations/admin/audit-trail?ref=${encodeURIComponent(ref)}`
+    : `${API_BASE}/organisations/admin/audit-trail`;
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to load audit trail");
+  }
+  return await res.json();
+}
+
+export type SetupInfo = {
+  valid: boolean;
+  organisation_id: string;
+  organisation_name: string;
+  registration_ref: string;
+  category: string;
+  location: string;
+  contact_name: string;
+  contact_channel: "email" | "whatsapp";
+  suggested_email?: string;
+  masked_contact: string;
+};
+
+export async function fetchSetupInfo(token: string): Promise<SetupInfo> {
+  const res = await fetch(`${API_BASE}/organisations/setup-info?token=${encodeURIComponent(token)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Setup token is invalid or has expired.");
+  }
+  return await res.json();
+}
+
+export async function completeAccountSetup(payload: {
+  token: string;
+  email: string;
+  password: string;
+}): Promise<{ status: string; message: string; organisation_name: string; admin_email: string }> {
+  const res = await fetch(`${API_BASE}/organisations/setup-account`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to configure account credentials.");
+  }
+  return await res.json();
+}
+
+export async function regenerateSetupToken(
+  orgId: string
+): Promise<{ status: string; setup_token: string; setup_url: string; expires_at: string }> {
+  const res = await fetch(`${API_BASE}/organisations/admin/${orgId}/regenerate-setup-token`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to regenerate setup token.");
+  }
+  return await res.json();
+}
+
+// ── Public Tenant Queue Dispatch APIs ──
+
+export type PublicOrganisationSummary = {
+  id: string;
+  name: string;
+  slug: string;
+  category: string;
+  location: string;
+};
+
+export type PublicTenantService = {
+  id: string;
+  facility_id: string;
+  name: string;
+  prefix: string;
+  avg_duration_minutes: number;
+  waiting_count: number;
+  open_desks: number;
+  est_wait_minutes: number;
+};
+
+export type PublicTenantFacility = {
+  id: string;
+  name: string;
+  location: string;
+  services: PublicTenantService[];
+};
+
+export type PublicTenantQueuesResponse = {
+  organisation: PublicOrganisationSummary;
+  facilities: PublicTenantFacility[];
+};
+
+export async function fetchPublicDirectory(): Promise<PublicOrganisationSummary[]> {
+  const res = await fetch(`${API_BASE}/organisations/public-directory`, {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    return [];
+  }
+  return await res.json();
+}
+
+export async function fetchPublicTenantQueues(slugOrId: string): Promise<PublicTenantQueuesResponse> {
+  const res = await fetch(`${API_BASE}/organisations/public/${encodeURIComponent(slugOrId)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Organisation not found or not active.");
+  }
+  return await res.json();
+}
+
+// Alias for joinBackendQueue so both joinQueue and joinBackendQueue work cleanly
+export const joinQueue = joinBackendQueue;
+
+// ── Dedicated Tenant Admin APIs ──
+
+export type TenantFacility = {
+  id: string;
+  organisation_id: string;
+  name: string;
+  location?: string;
+  created_at: string;
+};
+
+export type TenantStaff = {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  created_at: string;
+};
+
+export type TenantDashboardData = {
+  organisation: {
+    id: string;
+    name: string;
+    slug: string;
+    category: string;
+    location: string;
+    status: string;
+    public_url: string;
+  };
+  facilities: TenantFacility[];
+  services: ApiService[];
+  desks: AdminDesk[];
+  staff: TenantStaff[];
+  metrics: {
+    total_tickets: number;
+    waiting: number;
+    serving: number;
+    completed: number;
+    absent_or_skipped: number;
+    open_desks: number;
+    total_desks: number;
+  };
+};
+
+export async function fetchTenantDashboard(orgId?: string): Promise<TenantDashboardData> {
+  const url = orgId
+    ? `${API_BASE}/organisations/${encodeURIComponent(orgId)}/dashboard`
+    : `${API_BASE}/organisations/tenant/me`;
+  const res = await fetch(url, {
+    cache: "no-store",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to load tenant dashboard");
+  }
+  return await res.json();
+}
+
+export async function createTenantFacility(
+  orgId: string,
+  payload: { name: string; location?: string }
+): Promise<TenantFacility> {
+  const res = await fetch(`${API_BASE}/organisations/${encodeURIComponent(orgId)}/facilities`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to create facility");
+  }
+  return await res.json();
+}
+
+export async function createTenantService(
+  orgId: string,
+  payload: { facility_id: string; name: string; prefix: string; avg_duration_minutes: number }
+): Promise<ApiService> {
+  const res = await fetch(`${API_BASE}/organisations/${encodeURIComponent(orgId)}/services`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to create service line");
+  }
+  return await res.json();
+}
+
+export async function createTenantDesk(
+  orgId: string,
+  payload: { facility_id: string; name: string }
+): Promise<AdminDesk> {
+  const res = await fetch(`${API_BASE}/organisations/${encodeURIComponent(orgId)}/desks`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to create service counter");
+  }
+  return await res.json();
+}
+
+export async function fetchTenantStaff(orgId: string): Promise<TenantStaff[]> {
+  const res = await fetch(`${API_BASE}/organisations/${encodeURIComponent(orgId)}/staff`, {
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to load staff list");
+  }
+  return await res.json();
+}
+
+export async function createTenantStaff(
+  orgId: string,
+  payload: { name: string; email: string; password: string }
+): Promise<TenantStaff> {
+  const res = await fetch(`${API_BASE}/organisations/${encodeURIComponent(orgId)}/staff`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to provision staff account");
+  }
+  return await res.json();
+}
+
+export async function updateTenantProfile(
+  orgId: string,
+  payload: { name?: string; location?: string; additional_info?: string }
+): Promise<{ status: string; message: string }> {
+  const res = await fetch(`${API_BASE}/organisations/${encodeURIComponent(orgId)}/profile`, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to update organisation profile");
   }
   return await res.json();
 }

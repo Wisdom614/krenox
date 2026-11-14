@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Eyebrow, Modal } from "@/components/ui";
 import { desksLabel, getService, isValidPhone, organisation, saveTicket, services } from "@/lib/queue";
@@ -9,7 +9,7 @@ import { fetchServices, joinBackendQueue, sendWhatsAppOtp, verifyWhatsAppOtp } f
 type Props = { initialServiceId: string; onClose: () => void };
 
 const inputClass =
-  "mt-2 w-full rounded-xl border border-line-strong px-4 py-3 font-normal outline-none focus:border-brand focus:ring-2 focus:ring-brand/15 aria-[invalid=true]:border-danger";
+  "mt-2 w-full rounded-2xl border border-line-strong bg-white px-4 py-3.5 text-sm font-medium text-ink outline-none transition duration-200 placeholder:text-ink-subtle focus:border-forest focus:ring-4 focus:ring-forest/10 aria-[invalid=true]:border-status-danger";
 
 export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
   const router = useRouter();
@@ -20,11 +20,11 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [reminder, setReminder] = useState(true);
-  const [notifyThreshold, setNotifyThreshold] = useState<number>(2); // Alert when X people left ahead
+  const [notifyThreshold, setNotifyThreshold] = useState<number>(2);
   
   // WhatsApp OTP verification states
   const [otpSent, setOtpSent] = useState(false);
-  const [otpCode, setOtpCode] = useState("");
+  const [otpDigits, setOtpDigits] = useState<string[]>(["", "", "", "", "", ""]);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [otpError, setOtpError] = useState("");
@@ -32,6 +32,8 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
   const [touched, setTouched] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
   const [generalError, setGeneralError] = useState("");
+
+  const otpInputsRef = useRef<(HTMLInputElement | null)[]>([]);
 
   useEffect(() => {
     fetchServices().then((svcs) => {
@@ -51,13 +53,15 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
   async function handleSendOtp() {
     setOtpError("");
     if (!isValidPhone(phone)) {
-      setOtpError("Please enter a valid phone number first.");
+      setOtpError("Please enter a valid phone number first (e.g. +237 671 234 567).");
       return;
     }
     try {
       setIsVerifyingOtp(true);
       await sendWhatsAppOtp(phone);
       setOtpSent(true);
+      // Auto-focus first digit
+      setTimeout(() => otpInputsRef.current[0]?.focus(), 100);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to send OTP";
       setOtpError(msg);
@@ -66,19 +70,55 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
     }
   }
 
-  async function handleVerifyOtp() {
-    setOtpError("");
-    if (otpCode.trim().length < 6) {
-      setOtpError("Please enter the 6-digit code.");
+  function handleOtpDigitChange(index: number, val: string) {
+    // Handle paste of full 6-digit code
+    if (val.length > 1) {
+      const pasted = val.replace(/\D/g, "").slice(0, 6);
+      if (pasted.length > 0) {
+        const nextDigits = [...otpDigits];
+        for (let i = 0; i < 6; i++) {
+          nextDigits[i] = pasted[i] || "";
+        }
+        setOtpDigits(nextDigits);
+        const focusIdx = Math.min(pasted.length, 5);
+        otpInputsRef.current[focusIdx]?.focus();
+        if (pasted.length === 6) {
+          triggerVerification(pasted);
+        }
+      }
       return;
     }
+
+    const cleanChar = val.replace(/\D/g, "");
+    const nextDigits = [...otpDigits];
+    nextDigits[index] = cleanChar;
+    setOtpDigits(nextDigits);
+
+    if (cleanChar && index < 5) {
+      otpInputsRef.current[index + 1]?.focus();
+    }
+
+    const fullCode = nextDigits.join("");
+    if (fullCode.length === 6) {
+      triggerVerification(fullCode);
+    }
+  }
+
+  function handleOtpKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Backspace" && !otpDigits[index] && index > 0) {
+      otpInputsRef.current[index - 1]?.focus();
+    }
+  }
+
+  async function triggerVerification(code: string) {
+    setOtpError("");
     try {
       setIsVerifyingOtp(true);
-      await verifyWhatsAppOtp(phone, otpCode);
+      await verifyWhatsAppOtp(phone, code);
       setIsPhoneVerified(true);
       setOtpSent(false);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Invalid code";
+      const msg = err instanceof Error ? err.message : "Invalid code. Please re-check.";
       setOtpError(msg);
     } finally {
       setIsVerifyingOtp(false);
@@ -126,102 +166,119 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
 
   return (
     <Modal titleId="join-title" onClose={onClose} size="lg">
-      <div className="flex items-center justify-between border-b border-line px-6 py-5 sm:px-8">
+      <div className="flex items-center justify-between border-b border-line bg-canvas px-6 py-5 sm:px-8">
         <div>
-          <Eyebrow>{organisation.name}</Eyebrow>
-          <h2 id="join-title" className="mt-1 text-xl font-bold">Join the queue</h2>
+          <p className="text-xs font-semibold text-forest uppercase tracking-wider">
+            {("facilities" in service && (service as unknown as { facilities?: { organisations?: { name?: string } } }).facilities?.organisations?.name) || "Virtual Queue"}
+          </p>
+          <h2 id="join-title" className="mt-1 text-xl font-bold text-ink">
+            Join the Virtual Queue
+          </h2>
         </div>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close registration"
-          className="grid h-10 w-10 place-items-center rounded-full bg-mint text-xl text-brand-ink hover:bg-line transition"
+          className="grid h-9 w-9 place-items-center rounded-full bg-surface text-lg text-ink-muted border border-line hover:text-ink hover:border-forest/40 transition"
         >
           &times;
         </button>
       </div>
 
-      <form onSubmit={submit} noValidate className="px-6 py-7 sm:px-8">
-        <ol className="flex items-center gap-3 text-xs font-bold" aria-label="Progress">
-          <StepDot n={1} label="Service" active={step === 1} done={step === 2} />
-          <li aria-hidden className="h-px flex-1 bg-line-strong" />
-          <StepDot n={2} label="Details & WhatsApp" active={step === 2} done={false} />
+      <form onSubmit={submit} noValidate className="px-6 py-6 sm:px-8">
+        {/* Progress tracker */}
+        <ol className="flex items-center gap-3 text-xs font-semibold" aria-label="Registration steps">
+          <StepIndicator n={1} label="Service Counter" active={step === 1} done={step === 2} />
+          <li aria-hidden className="h-px flex-1 bg-line" />
+          <StepIndicator n={2} label="Customer & WhatsApp" active={step === 2} done={false} />
         </ol>
 
         {step === 1 ? (
-          <fieldset className="mt-7">
-            <legend className="text-sm font-bold">What do you need assistance with?</legend>
-            <div className="mt-3 grid gap-3">
-              {(backendServices.length > 0 ? backendServices : services).map((item) => (
-                <label
-                  key={item.id}
-                  className={`flex cursor-pointer items-center justify-between rounded-2xl border p-4 transition ${
-                    serviceId === item.id ? "border-brand bg-mint shadow-sm" : "border-line hover:border-line-strong"
-                  }`}
-                >
-                  <span className="flex items-center gap-3">
-                    <input
-                      className="accent-brand"
-                      type="radio"
-                      name="service"
-                      checked={serviceId === item.id}
-                      onChange={() => setServiceId(item.id)}
-                    />
-                    <span>
-                      <span className="block text-sm font-bold text-ink">{item.name}</span>
-                      <span className="block text-xs text-soft">
-                        {desksLabel("desksOpen" in item ? Number(item.desksOpen) : 2)}
+          <fieldset className="mt-6">
+            <legend className="text-sm font-bold text-ink">
+              Select the service counter you need assistance with:
+            </legend>
+            <div className="mt-3.5 grid gap-3">
+              {(backendServices.length > 0 ? backendServices : services).map((item) => {
+                const isSelected = serviceId === item.id;
+                return (
+                  <label
+                    key={item.id}
+                    className={`flex cursor-pointer items-center justify-between rounded-2xl border p-4.5 transition-all duration-200 ${
+                      isSelected
+                        ? "border-forest bg-forest text-white shadow-md"
+                        : "border-line bg-surface hover:border-forest/40 hover:bg-surface-hover"
+                    }`}
+                  >
+                    <span className="flex items-center gap-3.5">
+                      <input
+                        className="accent-mint h-4 w-4"
+                        type="radio"
+                        name="service"
+                        checked={isSelected}
+                        onChange={() => setServiceId(item.id)}
+                      />
+                      <span>
+                        <span className={`block text-sm font-bold ${isSelected ? "text-white" : "text-ink"}`}>
+                          {item.name}
+                        </span>
+                        <span className={`block text-xs ${isSelected ? "text-white/80" : "text-ink-muted"}`}>
+                          {desksLabel("desksOpen" in item ? Number(item.desksOpen) : 2)}
+                        </span>
                       </span>
                     </span>
-                  </span>
-                  <span className="text-right">
-                    <span className="block text-sm font-bold text-brand">
-                      ~{"avg_duration_minutes" in item ? item.avg_duration_minutes : 15} min
+                    <span className="text-right">
+                      <span className={`block font-mono text-sm font-bold ${isSelected ? "text-mint" : "text-forest"}`}>
+                        ~{"avg_duration_minutes" in item ? item.avg_duration_minutes : 15} min
+                      </span>
+                      <span className={`block text-[11px] ${isSelected ? "text-white/70" : "text-ink-subtle"}`}>
+                        est. wait
+                      </span>
                     </span>
-                    <span className="block text-[11px] text-soft">estimate</span>
-                  </span>
-                </label>
-              ))}
+                  </label>
+                );
+              })}
             </div>
             <Button className="mt-6 w-full" onClick={() => setStep(2)}>
-              Continue →
+              Continue to Customer Details →
             </Button>
           </fieldset>
         ) : (
-          <div className="mt-7">
-            <div className="flex items-center justify-between rounded-2xl bg-mint px-4 py-3 text-sm">
+          <div className="mt-6">
+            <div className="flex items-center justify-between rounded-2xl bg-forest/5 border border-forest/15 px-4 py-3 text-sm">
               <span>
-                <span className="font-bold text-ink">{service.name}</span>{" "}
-                <span className="text-soft">· Live queue ready</span>
+                <span className="font-bold text-forest">{service.name}</span>{" "}
+                <span className="text-ink-muted">· Live line active</span>
               </span>
               <button
                 type="button"
                 onClick={() => setStep(1)}
-                className="font-bold text-brand underline underline-offset-4"
+                className="text-xs font-bold text-forest underline underline-offset-4 hover:opacity-80"
               >
-                Change
+                Change Service
               </button>
             </div>
 
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <label className="text-sm font-bold text-ink">
+              <label className="text-xs font-bold uppercase tracking-wider text-ink-muted">
                 Your Full Name
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Ama N."
+                  placeholder="e.g. John Fru"
                   className={inputClass}
                 />
                 <FieldError id="name-error" show={touched} message={nameError} />
               </label>
 
-              <label className="text-sm font-bold text-ink">
-                WhatsApp Phone Number
+              <label className="text-xs font-bold uppercase tracking-wider text-ink-muted">
+                WhatsApp Phone
                 <input
                   value={phone}
                   onChange={(e) => {
                     setPhone(e.target.value);
                     setIsPhoneVerified(false);
+                    setOtpSent(false);
                   }}
                   type="tel"
                   placeholder="+237 6XX XXX XXX"
@@ -231,36 +288,36 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
               </label>
             </div>
 
-            {/* Privacy Shield Notice */}
-            <div className="mt-3 flex items-center gap-2 rounded-xl bg-[#f0f7f5] px-3.5 py-2 text-xs text-brand-ink">
-              <span>🛡️</span>
-              <span><strong>Privacy Protected:</strong> Your phone number is strictly encrypted and never exposed to staff or on public displays.</span>
+            {/* Privacy Shield Pill */}
+            <div className="mt-2 flex items-center gap-2.5 rounded-xl bg-surface-sunken border border-line px-3.5 py-2 text-xs text-ink-muted">
+              <span className="text-forest font-bold">🔒</span>
+              <span><strong>Campus Privacy:</strong> Your phone number is strictly encrypted and never visible on public monitors or tickets.</span>
             </div>
 
             {/* WhatsApp Verification & Proximity Settings */}
-            <div className="mt-4 rounded-2xl border border-line bg-[#f8faf9] p-4">
+            <div className="mt-4 rounded-2xl border border-line bg-surface p-4.5 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <label className="flex cursor-pointer items-start gap-3">
                   <input
                     type="checkbox"
                     checked={reminder}
                     onChange={(e) => setReminder(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 accent-brand"
+                    className="mt-0.5 h-4 w-4 accent-forest"
                   />
                   <div>
                     <span className="block text-sm font-bold text-ink">
-                      Send WhatsApp Ticket & Smart Alert
+                      WhatsApp Digital Pass & Live Alert
                     </span>
-                    <span className="block text-xs leading-relaxed text-soft">
-                      Receive an instant confirmation ticket and a heads-up alert before your turn.
+                    <span className="block text-xs leading-relaxed text-ink-muted mt-0.5">
+                      Receive your ticket directly in WhatsApp with a heads-up chime before your turn.
                     </span>
                   </div>
                 </label>
 
                 {reminder && (
-                  <div>
+                  <div className="shrink-0">
                     {isPhoneVerified ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[#e9f7f0] px-3 py-1 text-xs font-bold text-ok">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-status-called-bg px-3 py-1 text-xs font-bold text-status-called border border-status-called/20">
                         ✓ Verified
                       </span>
                     ) : (
@@ -268,7 +325,7 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
                         type="button"
                         onClick={handleSendOtp}
                         disabled={isVerifyingOtp || !isValidPhone(phone)}
-                        className="rounded-full bg-brand px-3 py-1.5 text-xs font-bold text-white hover:bg-brand-dark transition disabled:opacity-50"
+                        className="rounded-full bg-forest px-3.5 py-1.5 text-xs font-bold text-white hover:bg-forest-dark transition disabled:opacity-40"
                       >
                         {isVerifyingOtp ? "Sending..." : "Verify Number"}
                       </button>
@@ -277,35 +334,44 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
                 )}
               </div>
 
-              {/* OTP Entry Row */}
+              {/* 6-Digit OTP Entry Boxes */}
               {reminder && otpSent && !isPhoneVerified && (
-                <div className="mt-4 border-t border-line/60 pt-3">
-                  <p className="text-xs font-medium text-ink">
-                    Enter the 6-digit WhatsApp code sent to your phone:
+                <div className="mt-4 border-t border-line pt-4">
+                  <p className="text-xs font-semibold text-ink">
+                    Enter the 6-digit WhatsApp code sent to <span className="font-mono font-bold text-forest">{phone}</span>:
                   </p>
-                  <div className="mt-2 flex gap-2">
-                    <input
-                      value={otpCode}
-                      onChange={(e) => setOtpCode(e.target.value)}
-                      maxLength={6}
-                      placeholder="e.g. 123456"
-                      className="w-36 rounded-xl border border-line-strong px-3 py-2 font-mono text-center text-sm font-bold outline-none focus:border-brand"
-                    />
+                  <div className="mt-3 flex items-center justify-between gap-2 max-w-xs">
+                    {otpDigits.map((digit, i) => (
+                      <input
+                        key={i}
+                        ref={(el) => { otpInputsRef.current[i] = el; }}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={1}
+                        value={digit}
+                        onChange={(e) => handleOtpDigitChange(i, e.target.value)}
+                        onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                        className="h-11 w-11 rounded-xl border border-line-strong bg-white text-center font-mono text-lg font-bold text-ink focus:border-forest focus:ring-2 focus:ring-forest/20 outline-none transition"
+                      />
+                    ))}
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-xs">
                     <button
                       type="button"
-                      onClick={handleVerifyOtp}
+                      onClick={handleSendOtp}
                       disabled={isVerifyingOtp}
-                      className="rounded-xl bg-ink px-4 py-2 text-xs font-bold text-white hover:bg-ink/80 transition"
+                      className="font-bold text-forest underline hover:opacity-80"
                     >
-                      Confirm
+                      Resend code
                     </button>
+                    <span className="text-ink-subtle">Auto-verifies upon 6 digits</span>
                   </div>
                 </div>
               )}
 
-              {/* Threshold Selection (Custom "Notify me when X people left") */}
+              {/* Threshold Selector */}
               {reminder && isPhoneVerified && (
-                <div className="mt-4 border-t border-line/60 pt-3">
+                <div className="mt-4 border-t border-line pt-3">
                   <label htmlFor="threshold-select" className="block text-xs font-bold text-ink mb-1.5">
                     When should we alert you before your turn?
                   </label>
@@ -313,23 +379,23 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
                     id="threshold-select"
                     value={notifyThreshold}
                     onChange={(e) => setNotifyThreshold(Number(e.target.value))}
-                    className="w-full rounded-xl border border-line-strong bg-white px-3 py-2 text-xs font-semibold text-ink outline-none focus:border-brand"
+                    className="w-full rounded-xl border border-line-strong bg-surface-sunken px-3.5 py-2 text-xs font-semibold text-ink outline-none focus:border-forest"
                   >
-                    <option value={1}>When 1 person is left ahead (You are next)</option>
-                    <option value={2}>When 2 people are left ahead (~5 mins away)</option>
-                    <option value={3}>When 3 people are left ahead (~10 mins away)</option>
-                    <option value={5}>When 5 people are left ahead (~15 mins away)</option>
+                    <option value={1}>When 1 person is ahead (Immediate next)</option>
+                    <option value={2}>When 2 people are ahead (~5 mins away)</option>
+                    <option value={3}>When 3 people are ahead (~10 mins away)</option>
+                    <option value={5}>When 5 people are ahead (~15 mins away)</option>
                   </select>
                 </div>
               )}
 
               {otpError && (
-                <p className="mt-2 text-xs font-medium text-danger">{otpError}</p>
+                <p className="mt-2 text-xs font-semibold text-status-danger">{otpError}</p>
               )}
             </div>
 
             {generalError && (
-              <div className="mt-4 rounded-xl bg-[#fde8e8] p-3 text-xs font-medium text-danger border border-danger/20">
+              <div className="mt-4 rounded-xl bg-status-danger-bg p-3.5 text-xs font-semibold text-status-danger border border-status-danger/20">
                 {generalError}
               </div>
             )}
@@ -353,24 +419,24 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
   );
 }
 
-function StepDot({ n, label, active, done }: { n: number; label: string; active: boolean; done: boolean }) {
+function StepIndicator({ n, label, active, done }: { n: number; label: string; active: boolean; done: boolean }) {
   return (
     <li className="flex items-center gap-2" aria-current={active ? "step" : undefined}>
       <span
-        className={`grid h-7 w-7 place-items-center rounded-full text-xs font-bold ${
-          active || done ? "bg-brand text-white" : "bg-line text-soft"
+        className={`grid h-6 w-6 place-items-center rounded-full text-xs font-bold transition-colors ${
+          active || done ? "bg-forest text-white" : "bg-line text-ink-subtle"
         }`}
       >
         {done ? "✓" : n}
       </span>
-      <span className={active ? "text-brand" : "text-soft"}>{label}</span>
+      <span className={active ? "font-bold text-forest" : "text-ink-subtle"}>{label}</span>
     </li>
   );
 }
 
 function FieldError({ id, show, message }: { id: string; show: boolean; message: string }) {
   return (
-    <span id={id} role="alert" className="mt-1.5 block min-h-4 text-xs font-medium text-danger">
+    <span id={id} role="alert" className="mt-1 block min-h-4 text-[11px] font-semibold text-status-danger">
       {show ? message : ""}
     </span>
   );

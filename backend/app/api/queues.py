@@ -1,14 +1,22 @@
 import random
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 from app.core.supabase import supabase_client
 from app.core.security import limiter
 from app.core.masking import mask_phone_number
-from app.models.schemas import JoinQueueRequest, TicketResponse, QueueStatusResponse
+from app.models.schemas import (
+    JoinQueueRequest,
+    TicketResponse,
+    QueueStatusResponse,
+    CancelTicketPayload,
+    PostponeTicketPayload,
+    RecoverTicketPayload,
+)
 from app.services.whatsapp import whatsapp_service
+from app.services.organisations import org_workflow_service
 
 router = APIRouter(prefix="/queues", tags=["queues"])
 
@@ -56,8 +64,8 @@ def verify_whatsapp_otp(payload: VerifyOtpPayload):
 
 @router.get("/services")
 def list_services():
-    """List all available services and current active desk counts."""
-    response = supabase_client.table("services").select("*, facilities(name, organisations(name))").execute()
+    """List all available services across facilities and organisations."""
+    response = supabase_client.table("services").select("*, facilities(*, organisations(*))").execute()
     return response.data
 
 @router.post("/join", response_model=TicketResponse)
@@ -88,12 +96,21 @@ async def join_queue(req: JoinQueueRequest):
             )
 
     # Fetch service details to get ticket prefix
-    svc_res = supabase_client.table("services").select("*").eq("id", req.service_id).single().execute()
+    svc_res = supabase_client.table("services").select("*, facilities(organisation_id)").eq("id", req.service_id).single().execute()
     if not svc_res.data:
         raise HTTPException(status_code=404, detail="Service not found")
     
     svc = svc_res.data
     prefix = svc.get("prefix", "Q")
+
+    # Strict multi-tenant security gate: verify organisation is APPROVED
+    fac = svc.get("facilities") or {}
+    org_id = fac.get("organisation_id")
+    if org_id and not org_workflow_service.is_organisation_approved(org_id):
+        raise HTTPException(
+            status_code=403,
+            detail="This organisation is currently pending administrative review and cannot issue live tickets."
+        )
     
     # Calculate daily sequential ticket number
     count_today = (
@@ -163,8 +180,8 @@ async def join_queue(req: JoinQueueRequest):
 
 @router.get("/ticket/{ticket_id}", response_model=QueueStatusResponse)
 def get_ticket_status(ticket_id: str):
-    """Fetch live ticket status, current position, and people ahead (with masked phone number)."""
-    res = supabase_client.table("tickets").select("*, services(*)").eq("id", ticket_id).single().execute()
+    """Fetch live ticket status with multi-tenant organisation and facility details."""
+    res = supabase_client.table("tickets").select("*, services(*, facilities(*, organisations(*))), service_desks(name)").eq("id", ticket_id).single().execute()
     if not res.data:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
@@ -187,7 +204,14 @@ def get_ticket_status(ticket_id: str):
         .execute()
     )
     open_desks = max(open_desks_res.count or 1, 1)
-    avg_duration = t.get("services", {}).get("avg_duration_minutes", 15)
+    
+    svc = t.get("services") or {}
+    fac = svc.get("facilities") or {}
+    org = fac.get("organisations") or {}
+    desk = t.get("service_desks") or {}
+    desk_name = desk.get("name") if isinstance(desk, dict) else None
+
+    avg_duration = svc.get("avg_duration_minutes", 15)
     est_wait = max((customers_ahead * avg_duration) // open_desks, 2)
 
     return QueueStatusResponse(
@@ -202,9 +226,180 @@ def get_ticket_status(ticket_id: str):
             joined_at=t["joined_at"],
             position=position,
             estimated_wait_minutes=est_wait,
-            notify_threshold=2
+            notify_threshold=t.get("notify_threshold", 2),
+            service_name=svc.get("name"),
+            facility_name=f"{fac.get('name', '')} · {fac.get('location', '')}".strip(" ·") if fac else None,
+            organisation_name=org.get("name") if org else None,
+            desk_name=desk_name
         ),
         total_waiting=customers_ahead + 1,
         customers_ahead=customers_ahead,
         open_desks=open_desks
     )
+
+
+@router.post("/ticket/{ticket_id}/cancel")
+async def cancel_ticket(ticket_id: str, payload: CancelTicketPayload):
+    """
+    Customer cancels their active virtual queue ticket:
+    1. Validates PIN if provided.
+    2. Atomically sets status to 'cancelled' and sets completed_at.
+    3. Records event in queue_events.
+    4. Sends polite WhatsApp cancellation notice if opted in.
+    """
+    res = (
+        supabase_client.table("tickets")
+        .select("*, services(name)")
+        .eq("id", ticket_id)
+        .single()
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    t = res.data
+    if t["status"] in ["completed", "cancelled"]:
+        return {
+            "status": "cancelled",
+            "message": "Ticket is already cancelled or completed",
+            "ticket": t,
+        }
+
+    if payload.pin and payload.pin.strip() != t.get("pin"):
+        raise HTTPException(status_code=403, detail="Invalid verification PIN for this ticket")
+
+    now = datetime.utcnow().isoformat()
+    supabase_client.table("tickets").update({
+        "status": "cancelled",
+        "completed_at": now
+    }).eq("id", ticket_id).execute()
+
+    supabase_client.table("queue_events").insert({
+        "ticket_id": ticket_id,
+        "previous_status": t["status"],
+        "new_status": "cancelled",
+        "actor": "customer",
+        "note": payload.reason or "Customer cancelled virtual spot"
+    }).execute()
+
+    if t.get("customer_phone") and t.get("reminder_opt_in"):
+        svc_name = t.get("services", {}).get("name", "Queue")
+        msg = (
+            f"❌ *Krenox Queue Update*\n\n"
+            f"Your ticket *{t['ticket_number']}* for *{svc_name}* has been cancelled.\n"
+            f"Your spot in line has been released."
+        )
+        try:
+            await whatsapp_service.send_whatsapp_message(t["customer_phone"], msg)
+        except Exception:
+            pass
+
+    return {
+        "status": "ok",
+        "message": f"Ticket {t['ticket_number']} has been cancelled",
+        "ticket_id": ticket_id,
+    }
+
+
+@router.post("/ticket/{ticket_id}/postpone")
+def postpone_ticket(ticket_id: str, payload: PostponeTicketPayload):
+    """
+    Customer delays their turn by N spots (e.g. 3 or 5 positions):
+    Allows customer who is running late to push their turn back gracefully
+    without cancelling and losing their ticket number.
+    """
+    res = supabase_client.table("tickets").select("*").eq("id", ticket_id).single().execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    t = res.data
+    if t["status"] != "waiting":
+        raise HTTPException(status_code=400, detail="Only waiting tickets can be postponed")
+
+    if payload.pin and payload.pin.strip() != t.get("pin"):
+        raise HTTPException(status_code=403, detail="Invalid verification PIN for this ticket")
+
+    behind_res = (
+        supabase_client.table("tickets")
+        .select("id, joined_at")
+        .eq("service_id", t["service_id"])
+        .eq("status", "waiting")
+        .gt("joined_at", t["joined_at"])
+        .order("joined_at", desc=False)
+        .limit(payload.positions)
+        .execute()
+    )
+
+    behind_tickets = behind_res.data or []
+    if not behind_tickets:
+        return {
+            "status": "ok",
+            "message": "You are currently the last ticket in line.",
+            "positions_delayed": 0,
+        }
+
+    target_time_str = behind_tickets[-1]["joined_at"]
+    target_dt = datetime.fromisoformat(target_time_str.replace("Z", "+00:00"))
+    new_joined_at = (target_dt + timedelta(milliseconds=100)).isoformat()
+
+    supabase_client.table("tickets").update({
+        "joined_at": new_joined_at
+    }).eq("id", ticket_id).execute()
+
+    supabase_client.table("queue_events").insert({
+        "ticket_id": ticket_id,
+        "previous_status": "waiting",
+        "new_status": "waiting",
+        "actor": "customer",
+        "note": f"Customer delayed position by {len(behind_tickets)} spots"
+    }).execute()
+
+    return {
+        "status": "ok",
+        "message": f"Successfully postponed ticket by {len(behind_tickets)} positions.",
+        "positions_delayed": len(behind_tickets),
+    }
+
+
+@router.post("/recover")
+def recover_ticket(payload: RecoverTicketPayload):
+    """
+    Recover active ticket if user lost browser session:
+    Accepts phone number or ticket number + 6-digit PIN.
+    """
+    query_str = payload.phone_or_ticket.strip()
+    clean_phone = normalize_phone(query_str) if any(c.isdigit() for c in query_str) else None
+
+    query = (
+        supabase_client.table("tickets")
+        .select("id, ticket_number, pin, status, service_id, services(name, facilities(name, organisations(name)))")
+        .eq("pin", payload.pin.strip())
+    )
+
+    if clean_phone and len(clean_phone) >= 8:
+        query = query.or_(f"customer_phone.eq.{clean_phone},ticket_number.ilike.{query_str}")
+    else:
+        query = query.ilike("ticket_number", query_str)
+
+    res = (
+        query.in_("status", ["waiting", "called", "serving"])
+        .order("joined_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    if not res.data:
+        raise HTTPException(
+            status_code=404,
+            detail="No active ticket found matching these credentials. Please check your phone/ticket number and PIN.",
+        )
+
+    matched = res.data[0]
+    return {
+        "status": "ok",
+        "ticket_id": matched["id"],
+        "ticket_number": matched["ticket_number"],
+        "ticket_status": matched["status"],
+        "redirect_url": f"/waiting?ticketId={matched['id']}",
+    }
+

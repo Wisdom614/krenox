@@ -46,10 +46,18 @@ __pycache__/
 *.pyc
 backend/.env
 
+# Agents
+.agents/
+
+
 
 # Python
 backend/venv/
 __pycache__/
 *.pyc
 backend/.env
+
+# Agents
+.agents/
+
 
