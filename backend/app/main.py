@@ -31,6 +31,8 @@ app.include_router(simulation.router)
 app.include_router(admin.router)
 app.include_router(organisations.router)
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
+@app.api_route("/healthz", methods=["GET", "HEAD"])
+@app.api_route("/ping", methods=["GET", "HEAD"])
 def health_check():
     return {"status": "ok", "service": "krenox-backend", "version": "0.1.0"}

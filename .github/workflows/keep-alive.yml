@@ -1,0 +1,23 @@
+name: Keep Render Backend Warm
+
+on:
+  schedule:
+    # Runs every 12 minutes to prevent Render free instance from idling (15 min sleep threshold)
+    - cron: '*/12 * * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  keep-alive:
+    name: Ping Krenox Render Service
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Backend Health Endpoint
+        run: |
+          echo "Sending keep-alive ping to Krenox backend..."
+          RESPONSE=$(curl -s -w "%{http_code}" -o /dev/null -X GET "https://krenox-backend.onrender.com/ping")
+          echo "HTTP Response Code: $RESPONSE"
+          if [ "$RESPONSE" -eq 200 ] || [ "$RESPONSE" -eq 301 ] || [ "$RESPONSE" -eq 302 ]; then
+            echo "Krenox backend is warm and healthy!"
+          else
+            echo "Warning: Received unexpected status code: $RESPONSE"
+          fi
