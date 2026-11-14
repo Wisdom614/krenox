@@ -1,8 +1,9 @@
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from app.core.supabase import supabase_client
 from app.core.masking import mask_phone_number
+from app.core.auth import require_role, AuthenticatedUser
 from app.services.whatsapp import whatsapp_service
 
 router = APIRouter(prefix="/staff", tags=["staff"])
@@ -16,7 +17,10 @@ class UpdateTicketStatusPayload(BaseModel):
     status: str
 
 @router.get("/queue/{service_id}")
-def get_staff_queue(service_id: str):
+def get_staff_queue(
+    service_id: str,
+    user: AuthenticatedUser = Depends(require_role(["staff", "admin"]))
+):
     """
     Returns full live queue state for desk operators with phone numbers MASKED:
     Staff only see: 'Ama N.' and '671 ••• •57', preserving student privacy.
@@ -61,7 +65,10 @@ def get_staff_queue(service_id: str):
     }
 
 @router.post("/call-next")
-async def call_next_ticket(payload: CallNextPayload):
+async def call_next_ticket(
+    payload: CallNextPayload,
+    user: AuthenticatedUser = Depends(require_role(["staff", "admin"]))
+):
     """
     Staff operator calls the next eligible ticket:
     1. Selects the oldest 'waiting' ticket.
@@ -143,7 +150,10 @@ async def call_next_ticket(payload: CallNextPayload):
     }
 
 @router.post("/update-status")
-def update_ticket_status(payload: UpdateTicketStatusPayload):
+def update_ticket_status(
+    payload: UpdateTicketStatusPayload,
+    user: AuthenticatedUser = Depends(require_role(["staff", "admin"]))
+):
     """Transition ticket states."""
     allowed_statuses = ["serving", "completed", "skipped", "absent"]
     if payload.status not in allowed_statuses:

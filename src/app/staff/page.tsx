@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button, Logo } from "@/components/ui";
+import { useAuth } from "@/lib/auth-context";
 import {
   ApiService,
   StaffQueueState,
@@ -13,6 +15,9 @@ import {
 } from "@/lib/api";
 
 export default function StaffPage() {
+  const router = useRouter();
+  const { user, role, loading: authLoading, signOut } = useAuth();
+
   const [services, setServices] = useState<ApiService[]>([]);
   const [selectedServiceId, setSelectedServiceId] = useState<string>("");
   const [deskName, setDeskName] = useState<string>("Desk 1");
@@ -21,19 +26,27 @@ export default function StaffPage() {
   const [actionMessage, setActionMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
+  // Route Guard: enforce authentication
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push("/login?redirect=/staff");
+    }
+  }, [authLoading, user, router]);
+
   // Load available services
   useEffect(() => {
+    if (!user) return;
     fetchServices().then((svcs) => {
       if (svcs && svcs.length > 0) {
         setServices(svcs);
         setSelectedServiceId(svcs[0].id);
       }
     });
-  }, []);
+  }, [user]);
 
   // Poll queue state every 3.5 seconds
   const refreshQueue = useCallback(async () => {
-    if (!selectedServiceId) return;
+    if (!selectedServiceId || !user) return;
     try {
       const data = await fetchStaffQueue(selectedServiceId);
       setQueueState(data);
@@ -41,11 +54,11 @@ export default function StaffPage() {
     } catch {
       // Keep previous state if network hiccup
     }
-  }, [selectedServiceId]);
+  }, [selectedServiceId, user]);
 
   useEffect(() => {
     let active = true;
-    if (selectedServiceId) {
+    if (selectedServiceId && user) {
       fetchStaffQueue(selectedServiceId)
         .then((data) => {
           if (active) {
@@ -57,7 +70,7 @@ export default function StaffPage() {
     }
 
     const interval = setInterval(() => {
-      if (selectedServiceId && active) {
+      if (selectedServiceId && active && user) {
         fetchStaffQueue(selectedServiceId)
           .then((data) => {
             if (active) {
@@ -73,7 +86,7 @@ export default function StaffPage() {
       active = false;
       clearInterval(interval);
     };
-  }, [selectedServiceId]);
+  }, [selectedServiceId, user]);
 
   async function handleCallNext() {
     if (!selectedServiceId) return;
@@ -108,6 +121,20 @@ export default function StaffPage() {
     }
   }
 
+  if (authLoading || !user) {
+    return (
+      <main className="min-h-screen bg-[#f3f6f5] flex items-center justify-center p-6 text-center">
+        <div className="p-8 rounded-3xl bg-white border border-line-strong shadow-lg max-w-sm w-full">
+          <div className="w-12 h-12 rounded-2xl bg-brand text-white flex items-center justify-center font-bold text-lg mx-auto mb-3 animate-pulse">
+            UB
+          </div>
+          <h2 className="text-base font-bold text-ink">Verifying Operator Clearance...</h2>
+          <p className="text-xs text-soft mt-1">Authenticating credentials with University server</p>
+        </div>
+      </main>
+    );
+  }
+
   const selectedService = services.find((s) => s.id === selectedServiceId);
 
   return (
@@ -138,24 +165,39 @@ export default function StaffPage() {
                 <option value="Counter A">Counter A</option>
               </select>
             </div>
-            <Link
-              href="/admin"
-              className="text-xs font-semibold text-soft hover:text-brand transition"
-            >
-              Admin & Kiosks
-            </Link>
+            {role === "admin" && (
+              <Link
+                href="/admin"
+                className="text-xs font-semibold text-soft hover:text-brand transition"
+              >
+                Admin & Kiosks
+              </Link>
+            )}
             <Link
               href="/simulation"
               className="text-xs font-semibold text-soft hover:text-brand transition"
             >
               Simulation
             </Link>
-            <Link
-              href="/"
-              className="text-xs font-semibold text-soft hover:text-ink transition underline underline-offset-4"
-            >
-              Public Queue ↗
-            </Link>
+
+            <div className="flex items-center gap-2.5 pl-3 border-l border-line">
+              <div className="text-right hidden sm:block">
+                <div className="text-[11px] font-bold text-ink leading-tight">{user.email}</div>
+                <div className="text-[10px] text-brand font-bold uppercase tracking-wider">
+                  {role === "admin" ? "Administrator" : "Counter Operator"}
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  await signOut();
+                  router.push("/login");
+                }}
+                className="px-3 py-1.5 rounded-full text-xs font-bold text-danger bg-rose-50 hover:bg-rose-100 border border-danger/30 transition-colors"
+                title="Sign Out"
+              >
+                Sign Out
+              </button>
+            </div>
           </div>
         </div>
       </header>

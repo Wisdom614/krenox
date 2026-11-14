@@ -2,8 +2,10 @@
 
 import { useEffect, useState, useCallback, useId } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
 import { Logo } from "@/components/ui";
+import { useAuth } from "@/lib/auth-context";
 import {
   fetchAdminOverview,
   toggleServiceActive,
@@ -16,12 +18,26 @@ import {
 } from "@/lib/api";
 
 export default function AdminPage() {
+  const router = useRouter();
+  const { user, role, loading: authLoading, signOut } = useAuth();
+
   const [data, setData] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"services" | "desks" | "posters">("services");
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [actionPending, setActionPending] = useState<string | null>(null);
+
+  // Route Guard: enforce admin authorization
+  useEffect(() => {
+    if (!authLoading) {
+      if (!user) {
+        router.push("/login?redirect=/admin");
+      } else if (role !== "admin") {
+        router.push("/staff");
+      }
+    }
+  }, [authLoading, user, role, router]);
 
   // QR Station State
   const [selectedServiceForPoster, setSelectedServiceForPoster] = useState<string>("all");
@@ -58,6 +74,7 @@ export default function AdminPage() {
 
   // Load Data
   const loadOverview = useCallback(async () => {
+    if (!user || role !== "admin") return;
     try {
       const overview = await fetchAdminOverview();
       setData(overview);
@@ -69,31 +86,32 @@ export default function AdminPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user, role]);
 
   useEffect(() => {
     let active = true;
-    (async () => {
-      try {
-        const overview = await fetchAdminOverview();
-        if (active) {
-          setData(overview);
-          setLastRefreshed(new Date());
-          setError(null);
-          setLoading(false);
-        }
-      } catch (err) {
-        if (active) {
-          console.error("Failed to load admin overview:", err);
-          setError("Unable to connect to the administration server. Please verify backend connectivity.");
-          setLoading(false);
-        }
-      }
-    })();
+    if (user && role === "admin") {
+      fetchAdminOverview()
+        .then((overview) => {
+          if (active) {
+            setData(overview);
+            setLastRefreshed(new Date());
+            setError(null);
+            setLoading(false);
+          }
+        })
+        .catch((err) => {
+          if (active) {
+            console.error("Failed to load admin overview:", err);
+            setError("Unable to connect to the administration server. Please verify backend connectivity.");
+            setLoading(false);
+          }
+        });
+    }
     return () => {
       active = false;
     };
-  }, []);
+  }, [user, role]);
 
   // Generate QR Code whenever selected service or baseUrl changes
   useEffect(() => {
@@ -216,6 +234,20 @@ export default function AdminPage() {
 
   const selectedServiceObj = data?.services.find((s) => s.id === selectedServiceForPoster);
 
+  if (authLoading || !user || role !== "admin") {
+    return (
+      <main className="min-h-screen bg-[#f3f6f5] flex items-center justify-center p-6 text-center">
+        <div className="p-8 rounded-3xl bg-white border border-line-strong shadow-lg max-w-sm w-full">
+          <div className="w-12 h-12 rounded-2xl bg-brand text-white flex items-center justify-center font-bold text-lg mx-auto mb-3 animate-pulse">
+            UB
+          </div>
+          <h2 className="text-base font-bold text-ink">Verifying Administrator Clearance...</h2>
+          <p className="text-xs text-soft mt-1">Checking cryptographic supervisor authorization</p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#f3f6f5] text-ink pb-20 selection:bg-brand selection:text-white">
       {/* ── Top Bar ── */}
@@ -267,12 +299,24 @@ export default function AdminPage() {
               Simulation →
             </Link>
 
-            <Link
-              href="/"
-              className="text-xs font-semibold text-soft hover:text-ink transition underline underline-offset-4"
-            >
-              Public Home ↗
-            </Link>
+            <div className="flex items-center gap-2.5 pl-3 border-l border-line">
+              <div className="text-right hidden sm:block">
+                <div className="text-[11px] font-bold text-ink leading-tight">{user.email}</div>
+                <div className="text-[10px] text-brand font-bold uppercase tracking-wider">
+                  Administrator
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  await signOut();
+                  router.push("/login");
+                }}
+                className="px-3 py-1.5 rounded-full text-xs font-bold text-danger bg-rose-50 hover:bg-rose-100 border border-danger/30 transition-colors"
+                title="Sign Out"
+              >
+                Sign Out
+              </button>
+            </div>
           </div>
         </div>
       </header>

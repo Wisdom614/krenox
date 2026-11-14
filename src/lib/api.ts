@@ -1,4 +1,17 @@
+import { getStoredAccessToken } from "./auth-context";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
+function getAuthHeaders(): Record<string, string> {
+  const token = getStoredAccessToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
+}
 
 export type ApiService = {
   id: string;
@@ -159,19 +172,25 @@ export async function fetchTicketStatus(ticketId: string): Promise<ApiQueueStatu
 // ── Staff Operator Functions ──
 
 export async function fetchStaffQueue(serviceId: string): Promise<StaffQueueState> {
-  const res = await fetch(`${API_BASE}/staff/queue/${serviceId}`, { cache: "no-store" });
-  if (!res.ok) throw new Error("Failed to load staff queue");
+  const res = await fetch(`${API_BASE}/staff/queue/${serviceId}`, {
+    cache: "no-store",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to load staff queue");
+  }
   return await res.json();
 }
 
 export async function callNextTicket(serviceId: string, deskName: string): Promise<{ status: string; ticket: ApiTicket; desk: string; message: string }> {
   const res = await fetch(`${API_BASE}/staff/call-next`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders(),
     body: JSON.stringify({ service_id: serviceId, desk_name: deskName }),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Could not call next ticket");
   }
   return await res.json();
@@ -180,11 +199,11 @@ export async function callNextTicket(serviceId: string, deskName: string): Promi
 export async function updateTicketStatus(ticketId: string, status: string): Promise<{ status: string; ticket: ApiTicket }> {
   const res = await fetch(`${API_BASE}/staff/update-status`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders(),
     body: JSON.stringify({ ticket_id: ticketId, status }),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Failed to update ticket status");
   }
   return await res.json();
@@ -215,28 +234,40 @@ export async function runSimulation(params: {
 // ── Admin Functions ──
 
 export async function fetchAdminOverview(): Promise<AdminOverview> {
-  const res = await fetch(`${API_BASE}/admin/overview`, { cache: "no-store" });
-  if (!res.ok) throw new Error("Failed to load admin overview");
+  const res = await fetch(`${API_BASE}/admin/overview`, {
+    cache: "no-store",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to load admin overview");
+  }
   return await res.json();
 }
 
 export async function toggleServiceActive(serviceId: string, isActive: boolean): Promise<{ status: string; service: ApiService }> {
   const res = await fetch(`${API_BASE}/admin/services/toggle`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders(),
     body: JSON.stringify({ service_id: serviceId, is_active: isActive }),
   });
-  if (!res.ok) throw new Error("Failed to toggle service");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to toggle service");
+  }
   return await res.json();
 }
 
 export async function toggleDeskOpen(deskId: string, isOpen: boolean): Promise<{ status: string; desk: AdminDesk }> {
   const res = await fetch(`${API_BASE}/admin/desks/toggle`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders(),
     body: JSON.stringify({ desk_id: deskId, is_open: isOpen }),
   });
-  if (!res.ok) throw new Error("Failed to toggle desk");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to toggle desk");
+  }
   return await res.json();
 }
 
@@ -248,11 +279,11 @@ export async function createService(payload: {
 }): Promise<{ status: string; service: ApiService }> {
   const res = await fetch(`${API_BASE}/admin/services`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders(),
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Failed to create service");
   }
   return await res.json();
@@ -264,11 +295,11 @@ export async function createDesk(payload: {
 }): Promise<{ status: string; desk: AdminDesk }> {
   const res = await fetch(`${API_BASE}/admin/desks`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders(),
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Failed to create desk");
   }
   return await res.json();

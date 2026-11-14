@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Optional
 from app.core.supabase import supabase_client
+from app.core.auth import require_role, AuthenticatedUser
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -24,7 +25,9 @@ class CreateDeskPayload(BaseModel):
     name: str
 
 @router.get("/overview")
-def get_admin_overview():
+def get_admin_overview(
+    user: AuthenticatedUser = Depends(require_role(["admin"]))
+):
     """
     Returns administrative telemetry:
     - Organisations & facilities
@@ -60,7 +63,10 @@ def get_admin_overview():
     }
 
 @router.post("/services")
-def create_service(payload: CreateServicePayload):
+def create_service(
+    payload: CreateServicePayload,
+    user: AuthenticatedUser = Depends(require_role(["admin"]))
+):
     """Add a new queue service to a facility."""
     insert_res = supabase_client.table("services").insert({
         "facility_id": payload.facility_id,
@@ -76,7 +82,10 @@ def create_service(payload: CreateServicePayload):
     return {"status": "ok", "service": insert_res.data[0]}
 
 @router.post("/services/toggle")
-def toggle_service(payload: ToggleServicePayload):
+def toggle_service(
+    payload: ToggleServicePayload,
+    user: AuthenticatedUser = Depends(require_role(["admin"]))
+):
     """Pause or resume a queue service."""
     update_res = supabase_client.table("services").update({
         "is_active": payload.is_active
@@ -88,7 +97,10 @@ def toggle_service(payload: ToggleServicePayload):
     return {"status": "ok", "service": update_res.data[0]}
 
 @router.post("/desks")
-def create_desk(payload: CreateDeskPayload):
+def create_desk(
+    payload: CreateDeskPayload,
+    user: AuthenticatedUser = Depends(require_role(["admin"]))
+):
     """Add a new service counter."""
     insert_res = supabase_client.table("service_desks").insert({
         "facility_id": payload.facility_id,
@@ -102,7 +114,10 @@ def create_desk(payload: CreateDeskPayload):
     return {"status": "ok", "desk": insert_res.data[0]}
 
 @router.post("/desks/toggle")
-def toggle_desk(payload: ToggleDeskPayload):
+def toggle_desk(
+    payload: ToggleDeskPayload,
+    user: AuthenticatedUser = Depends(require_role(["admin"]))
+):
     """Open or close a service counter."""
     update_res = supabase_client.table("service_desks").update({
         "is_open": payload.is_open

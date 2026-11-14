@@ -68,31 +68,19 @@ export default function Home() {
           aria-label="Main"
         >
           <Logo className="text-white" />
-          <div className="flex items-center gap-3 sm:gap-6 text-sm font-medium text-white/90">
-            <a className="hidden transition hover:text-white md:block text-xs sm:text-sm" href="#services">
+          <div className="flex items-center gap-6 text-sm font-medium text-white/90">
+            <a className="transition hover:text-white text-sm" href="#services">
               Services
             </a>
-            <a className="hidden transition hover:text-white md:block text-xs sm:text-sm" href="#how-it-works">
+            <a className="transition hover:text-white text-sm" href="#how-it-works">
               How it works
             </a>
-            <Link
-              href="/simulation"
-              className="hidden transition hover:text-white md:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-xs font-bold text-[#6ee7b7] hover:bg-white/15"
+            <button
+              onClick={() => openQueue()}
+              className="inline-flex items-center justify-center rounded-full border border-white/30 bg-white/15 px-5 py-2 text-sm font-bold text-white backdrop-blur transition hover:bg-white/25 shadow-sm"
             >
-              Simulation
-            </Link>
-            <Link
-              href="/admin"
-              className="hidden transition hover:text-white md:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-xs font-bold text-[#38bdf8] hover:bg-white/15"
-            >
-              Admin & Kiosks
-            </Link>
-            <Link
-              href="/staff"
-              className="inline-flex items-center justify-center rounded-full border border-white/30 bg-white/15 px-4 sm:px-5 py-2 text-xs sm:text-sm font-bold text-white backdrop-blur transition hover:bg-white/25 shadow-sm"
-            >
-              Staff Console →
-            </Link>
+              Take a Ticket →
+            </button>
           </div>
         </nav>
 
@@ -292,18 +280,11 @@ export default function Home() {
       {/* ───────────── Footer ───────────── */}
       <footer className="px-6 py-8 text-sm text-soft">
         <div className="mx-auto flex max-w-7xl flex-col justify-between gap-4 sm:flex-row sm:items-center">
-          <span>© 2026 Krenox. All rights reserved.</span>
+          <span>© 2026 Krenox · University of Buea B.Tech Software Engineering</span>
           <div className="flex items-center gap-6">
-            <Link href="/admin" className="hover:text-ink transition font-medium text-xs">
-              Admin Kiosks & QR
+            <Link href="/login" className="hover:text-ink transition font-medium text-xs text-soft">
+              Staff & Admin Portal 🔒
             </Link>
-            <Link href="/staff" className="hover:text-ink transition font-medium text-xs">
-              Staff Console
-            </Link>
-            <Link href="/simulation" className="hover:text-ink transition font-medium text-xs">
-              Simulation Study
-            </Link>
-            <span className="text-xs">B.Tech Project · University of Buea</span>
           </div>
         </div>
       </footer>
