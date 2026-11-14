@@ -64,34 +64,34 @@ export default function Home() {
 
         {/* Navigation */}
         <nav
-          className="mx-auto flex max-w-7xl items-center justify-between px-6 py-6 lg:px-8"
+          className="relative z-30 mx-auto flex max-w-7xl items-center justify-between px-6 py-6 lg:px-8"
           aria-label="Main"
         >
           <Logo className="text-white" />
-          <div className="flex items-center gap-6 text-sm font-medium text-white/85 sm:gap-8">
-            <a className="hidden transition hover:text-white md:block" href="#services">
+          <div className="flex items-center gap-3 sm:gap-6 text-sm font-medium text-white/90">
+            <a className="hidden transition hover:text-white md:block text-xs sm:text-sm" href="#services">
               Services
             </a>
-            <a className="hidden transition hover:text-white md:block" href="#how-it-works">
+            <a className="hidden transition hover:text-white md:block text-xs sm:text-sm" href="#how-it-works">
               How it works
             </a>
             <Link
               href="/simulation"
-              className="hidden transition hover:text-white md:block text-xs font-bold text-[#6ee7b7]"
+              className="hidden transition hover:text-white md:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-xs font-bold text-[#6ee7b7] hover:bg-white/15"
             >
-              Evaluation & Simulation
+              Simulation
             </Link>
             <Link
               href="/admin"
-              className="hidden transition hover:text-white md:block text-xs font-bold text-[#38bdf8]"
+              className="hidden transition hover:text-white md:inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-xs font-bold text-[#38bdf8] hover:bg-white/15"
             >
-              Admin & QR Kiosks
+              Admin & Kiosks
             </Link>
             <Link
               href="/staff"
-              className="inline-flex items-center justify-center rounded-full border border-white/30 bg-white/10 px-5 py-2.5 text-sm font-bold text-white backdrop-blur transition hover:bg-white/20"
+              className="inline-flex items-center justify-center rounded-full border border-white/30 bg-white/15 px-4 sm:px-5 py-2 text-xs sm:text-sm font-bold text-white backdrop-blur transition hover:bg-white/25 shadow-sm"
             >
-              Staff console
+              Staff Console →
             </Link>
           </div>
         </nav>
@@ -122,7 +122,7 @@ export default function Home() {
           </div>
 
           {/* Ticket preview widget */}
-          <div className="relative w-full max-w-[340px] justify-self-start lg:-mt-24 lg:justify-self-end lg:self-start">
+          <div className="relative w-full max-w-[340px] justify-self-start lg:justify-self-end lg:self-center mt-6 lg:mt-0">
             <div className="rounded-[1.75rem] border border-white/60 bg-white/95 p-5 text-ink shadow-[0_24px_70px_rgba(0,0,0,.35)] backdrop-blur transition duration-300 hover:shadow-[0_30px_90px_rgba(0,0,0,.45)]">
               <div className="flex items-start justify-between">
                 <div>
