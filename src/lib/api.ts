@@ -2,13 +2,18 @@ import { getStoredAccessToken } from "./auth-context";
 
 export function getApiBase(): string {
   if (process.env.NEXT_PUBLIC_API_URL) {
-    return process.env.NEXT_PUBLIC_API_URL;
+    return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, "");
   }
   if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    // When running on Vercel production or preview, target the live Render backend
+    if (host.includes("vercel.app") || host.includes("krenox.cm")) {
+      return "https://krenox-backend.onrender.com";
+    }
     // When accessed from external devices on Wi-Fi/LAN (e.g. mobile phone scanning QR code),
     // automatically communicate with the host's port 8000
-    if (window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
-      return `${window.location.protocol}//${window.location.hostname}:8000`;
+    if (host !== "localhost" && host !== "127.0.0.1") {
+      return `${window.location.protocol}//${host}:8000`;
     }
   }
   return "http://127.0.0.1:8000";
