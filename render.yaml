@@ -27,3 +27,4 @@ services:
         value: Krenox <verify@wisedev.online>
       - key: FRONTEND_URL
         sync: false
+
