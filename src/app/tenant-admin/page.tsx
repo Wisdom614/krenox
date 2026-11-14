@@ -67,6 +67,27 @@ export default function TenantAdminPage() {
   // QR Poster state
   const [qrDataUrl, setQrDataUrl] = useState<string>("");
   const [copiedLink, setCopiedLink] = useState(false);
+  const [qrHostMode, setQrHostMode] = useState<"lan" | "localhost" | "custom">("lan");
+  const [customHost, setCustomHost] = useState<string>("");
+
+  const effectiveOrigin =
+    qrHostMode === "lan" && data?.local_ip
+      ? `http://${data.local_ip}:3000`
+      : qrHostMode === "custom" && customHost
+      ? customHost.trim()
+      : typeof window !== "undefined"
+      ? window.location.origin
+      : "http://localhost:3000";
+
+  const fullPublicUrl = data ? `${effectiveOrigin}${data.organisation.public_url}` : "";
+
+  // Generate QR Code dynamically whenever the public URL or host changes
+  useEffect(() => {
+    if (!fullPublicUrl) return;
+    QRCode.toDataURL(fullPublicUrl, { width: 360, margin: 2 }, (err, url) => {
+      if (!err && url) setQrDataUrl(url);
+    });
+  }, [fullPublicUrl]);
 
   // Accessible IDs
   const facilityNameId = useId();
@@ -95,14 +116,6 @@ export default function TenantAdminPage() {
         setServiceFacilityId(res.facilities[0].id);
         setDeskFacilityId(res.facilities[0].id);
       }
-
-      // Generate QR Code for public dispatch URL
-      if (typeof window !== "undefined") {
-        const fullPublicUrl = `${window.location.origin}${res.organisation.public_url}`;
-        QRCode.toDataURL(fullPublicUrl, { width: 360, margin: 2 }, (err, url) => {
-          if (!err && url) setQrDataUrl(url);
-        });
-      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load organisation dashboard");
     } finally {
@@ -115,9 +128,8 @@ export default function TenantAdminPage() {
   }, [loadDashboard]);
 
   function copyPublicLink() {
-    if (typeof window !== "undefined" && data) {
-      const fullUrl = `${window.location.origin}${data.organisation.public_url}`;
-      navigator.clipboard?.writeText(fullUrl);
+    if (fullPublicUrl) {
+      navigator.clipboard?.writeText(fullPublicUrl);
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2000);
     }
@@ -694,7 +706,7 @@ export default function TenantAdminPage() {
         {/* ── TAB 5: PRINTABLE ENTRANCE POSTER ── */}
         {activeTab === "poster" && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between print:hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 print:hidden">
               <div>
                 <h2 className="text-lg font-bold text-ink">Physical Entrance Poster Template</h2>
                 <p className="text-xs text-ink-muted">
@@ -702,6 +714,64 @@ export default function TenantAdminPage() {
                 </p>
               </div>
               <Button onClick={() => window.print()}>Print A4 Poster 🖨</Button>
+            </div>
+
+            {/* Network / Host Selector Tray (Screen Only) */}
+            <div className="max-w-xl mx-auto bg-surface-sunken border border-line rounded-2xl p-4 text-xs space-y-3 print:hidden">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-ink uppercase tracking-wider text-[11px]">
+                  Poster Link Host
+                </span>
+                <span className="text-ink-muted text-[11px]">
+                  Configure whether phones scan via Wi-Fi IP or Localhost
+                </span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2">
+                <select
+                  value={qrHostMode}
+                  onChange={(e) => setQrHostMode(e.target.value as "lan" | "localhost" | "custom")}
+                  className="px-3 py-1.5 rounded-xl border border-line bg-white text-ink text-xs font-semibold focus:outline-none focus:border-forest"
+                >
+                  <option value="lan">
+                    📱 Phone Wi-Fi ({data.local_ip || "192.168.1.242"}:3000)
+                  </option>
+                  <option value="localhost">💻 Localhost (localhost:3000)</option>
+                  <option value="custom">🌐 Custom Domain / Ngrok</option>
+                </select>
+
+                {qrHostMode === "custom" && (
+                  <input
+                    type="url"
+                    placeholder="https://krenox.cm or https://xyz.ngrok-free.app"
+                    value={customHost}
+                    onChange={(e) => setCustomHost(e.target.value)}
+                    className="flex-1 px-3 py-1.5 rounded-xl border border-line bg-white text-ink text-xs font-mono"
+                  />
+                )}
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-line/60">
+                <span className="font-mono text-forest font-bold truncate mr-2">
+                  {fullPublicUrl}
+                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={copyPublicLink}
+                    className="px-3 py-1 rounded-lg border border-line bg-white hover:bg-surface-sunken text-ink font-semibold transition"
+                  >
+                    {copiedLink ? "✓ Copied" : "Copy Link"}
+                  </button>
+                  <a
+                    href={fullPublicUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1 rounded-lg bg-forest text-white font-bold hover:bg-forest-dark transition"
+                  >
+                    Open ↗
+                  </a>
+                </div>
+              </div>
             </div>
 
             {/* Poster Card (styled for screen and @media print) */}
@@ -751,10 +821,8 @@ export default function TenantAdminPage() {
 
               <div className="mt-8 text-[11px] text-ink-muted font-mono">
                 Direct Web URL:{" "}
-                <span className="font-bold text-ink">
-                  {typeof window !== "undefined"
-                    ? `${window.location.origin}${data.organisation.public_url}`
-                    : `krenox.cm${data.organisation.public_url}`}
+                <span className="font-bold text-forest underline">
+                  {fullPublicUrl}
                 </span>
               </div>
             </div>

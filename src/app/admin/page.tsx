@@ -70,6 +70,10 @@ export default function AdminPage() {
 
   // QR Station State
   const [selectedServiceForPoster, setSelectedServiceForPoster] = useState<string>("all");
+  const [selectedOrgSlug, setSelectedOrgSlug] = useState<string>("");
+  const [qrHostMode, setQrHostMode] = useState<"lan" | "localhost" | "custom">("lan");
+  const [customHost, setCustomHost] = useState<string>("");
+  const [copiedTargetUrl, setCopiedTargetUrl] = useState<boolean>(false);
   const [baseUrl, setBaseUrl] = useState<string>(() => {
     if (typeof window !== "undefined") {
       return window.location.origin;
@@ -111,7 +115,8 @@ export default function AdminPage() {
       setError(null);
     } catch (err) {
       console.error("Failed to load admin overview:", err);
-      setError("Unable to connect to the administration server. Please verify backend connectivity.");
+      const msg = err instanceof Error ? err.message : "Unable to connect to the administration server.";
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -189,19 +194,38 @@ export default function AdminPage() {
   }, [user, role]);
 
   // Generate QR Code pointing directly to tenant customer dispatch: /q/[orgSlug]
+  const activeOrg =
+    data?.organisations?.find((o) => o.slug === selectedOrgSlug) ||
+    data?.organisations?.[0] ||
+    (data?.services?.[0]?.facilities?.organisations
+      ? {
+          name: data.services[0].facilities.organisations.name,
+          slug: data.services[0].facilities.organisations.slug,
+        }
+      : null);
+
+  const activeOrgSlug =
+    activeOrg?.slug ||
+    (user?.user_metadata?.organisation_slug as string) ||
+    "buea-bojongo-police";
+
+  const activeOrgName = activeOrg?.name || "Campus Virtual Queue";
+
+  const effectiveBaseUrl =
+    qrHostMode === "lan" && data?.local_ip
+      ? `http://${data.local_ip}:3000`
+      : qrHostMode === "custom" && customHost
+      ? customHost.trim()
+      : baseUrl || "http://localhost:3000";
+
+  const targetUrl =
+    selectedServiceForPoster !== "all"
+      ? `${effectiveBaseUrl}/q/${activeOrgSlug}?serviceId=${selectedServiceForPoster}`
+      : `${effectiveBaseUrl}/q/${activeOrgSlug}`;
+
   useEffect(() => {
     let active = true;
-    if (!baseUrl) return;
-
-    const orgSlug =
-      (user?.user_metadata?.organisation_slug as string) ||
-      data?.services[0]?.facilities?.organisations?.slug ||
-      "ubuea";
-
-    let targetUrl = `${baseUrl}/q/${orgSlug}`;
-    if (selectedServiceForPoster !== "all") {
-      targetUrl = `${baseUrl}/q/${orgSlug}?serviceId=${selectedServiceForPoster}`;
-    }
+    if (!targetUrl) return;
 
     QRCode.toDataURL(targetUrl, {
       width: 480,
@@ -222,7 +246,7 @@ export default function AdminPage() {
     return () => {
       active = false;
     };
-  }, [selectedServiceForPoster, baseUrl]);
+  }, [targetUrl]);
 
   // Handlers
   async function handleToggleService(service: ApiService) {
@@ -1445,90 +1469,195 @@ export default function AdminPage() {
             </button>
           </div>
 
-          {/* Printable Poster (White paper format) */}
-          <div className="printable-poster w-full max-w-2xl bg-white text-ink rounded-3xl p-8 sm:p-12 shadow-2xl relative my-8 flex flex-col items-center text-center border border-line-strong">
-            {/* UB Seal Header */}
-            <div className="w-16 h-16 rounded-2xl bg-brand text-white flex items-center justify-center font-black text-2xl shadow-md mb-3">
-              UB
-            </div>
+          <div className="w-full max-w-2xl my-8 flex flex-col items-center">
+            {/* ── Top QR Target Config Tray (Hidden during printing) ── */}
+            <div className="w-full bg-[#08282b] text-white p-4 rounded-3xl mb-4 border border-white/10 shadow-xl no-print space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <span className="font-bold text-mint uppercase tracking-wider text-[11px]">
+                  QR Target Configuration
+                </span>
+                <span className="text-white/60 text-[11px]">
+                  Select network mode so phone cameras can reach your kiosk
+                </span>
+              </div>
 
-            <div className="text-xs uppercase tracking-widest font-bold text-brand mb-1">
-              University of Buea • Student Services
-            </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                {/* Organisation Selector */}
+                {data?.organisations && data.organisations.length > 0 && (
+                  <div>
+                    <label className="block text-[11px] font-semibold text-white/80 mb-1">
+                      Organisation:
+                    </label>
+                    <select
+                      value={activeOrgSlug}
+                      onChange={(e) => setSelectedOrgSlug(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-xl bg-white/10 border border-white/20 text-white text-xs font-semibold focus:outline-none focus:border-mint"
+                    >
+                      {data.organisations.map((org) => (
+                        <option key={org.id} value={org.slug} className="text-ink">
+                          {org.name} (/q/{org.slug})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
-            <h1 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight mb-2">
-              {selectedServiceObj ? selectedServiceObj.name : "Student Digital Queue Station"}
-            </h1>
+                {/* Connection Mode */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-white/80 mb-1">
+                    Scan Host Mode:
+                  </label>
+                  <select
+                    value={qrHostMode}
+                    onChange={(e) => setQrHostMode(e.target.value as "lan" | "localhost" | "custom")}
+                    className="w-full px-3 py-1.5 rounded-xl bg-white/10 border border-white/20 text-white text-xs font-semibold focus:outline-none focus:border-mint"
+                  >
+                    <option value="lan" className="text-ink">
+                      📱 Phone Wi-Fi ({data?.local_ip || "192.168.1.242"}:3000)
+                    </option>
+                    <option value="localhost" className="text-ink">
+                      💻 Localhost (localhost:3000)
+                    </option>
+                    <option value="custom" className="text-ink">
+                      🌐 Custom Domain / Ngrok
+                    </option>
+                  </select>
+                </div>
+              </div>
 
-            <p className="text-sm sm:text-base text-soft max-w-lg mb-6 leading-relaxed">
-              Skip the crowded physical waiting lines. Scan the QR code below to take your digital ticket and receive real-time alerts directly on WhatsApp.
-            </p>
-
-            {/* QR Code Big Container */}
-            <div className="p-4 bg-white border-4 border-brand rounded-3xl shadow-md mb-6">
-              {qrDataUrl && (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
-                  src={qrDataUrl}
-                  alt="Krenox Queue Ticket QR"
-                  className="w-64 h-64 sm:w-80 sm:h-80 object-contain"
-                />
+              {qrHostMode === "custom" && (
+                <div>
+                  <label className="block text-[11px] font-semibold text-white/80 mb-1">
+                    Custom Base URL:
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://krenox.cm or https://xyz.ngrok-free.app"
+                    value={customHost}
+                    onChange={(e) => setCustomHost(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-xl bg-white/10 border border-white/20 text-white text-xs font-mono focus:outline-none focus:border-mint"
+                  />
+                </div>
               )}
-            </div>
 
-            <div className="font-mono text-xs text-brand font-bold bg-mint px-4 py-1.5 rounded-full border border-line-strong mb-8">
-              {selectedServiceForPoster === "all"
-                ? baseUrl
-                : `${baseUrl}/?serviceId=${selectedServiceForPoster}`}
-            </div>
-
-            {/* 3 Step Instruction Box */}
-            <div className="grid grid-cols-3 gap-4 w-full border-t border-b border-line py-6 mb-6 text-left">
-              <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-brand text-white font-bold flex items-center justify-center text-sm flex-shrink-0">
-                  1
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-white/10 text-[11px]">
+                <div className="flex items-center gap-2 font-mono text-mint truncate">
+                  <span className="w-2 h-2 rounded-full bg-mint animate-pulse shrink-0" />
+                  <span className="truncate">{targetUrl}</span>
                 </div>
-                <div>
-                  <h4 className="font-bold text-xs text-ink">Scan Code</h4>
-                  <p className="text-[11px] text-soft">
-                    Open phone camera or WhatsApp
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-brand text-white font-bold flex items-center justify-center text-sm flex-shrink-0">
-                  2
-                </div>
-                <div>
-                  <h4 className="font-bold text-xs text-ink">Take Ticket</h4>
-                  <p className="text-[11px] text-soft">
-                    Provide name & WhatsApp number
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-brand text-white font-bold flex items-center justify-center text-sm flex-shrink-0">
-                  3
-                </div>
-                <div>
-                  <h4 className="font-bold text-xs text-ink">Relax & Enter</h4>
-                  <p className="text-[11px] text-soft">
-                    We message you when ready
-                  </p>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard?.writeText(targetUrl);
+                      setCopiedTargetUrl(true);
+                      setTimeout(() => setCopiedTargetUrl(false), 2000);
+                    }}
+                    className="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white font-semibold transition"
+                  >
+                    {copiedTargetUrl ? "✓ Copied" : "Copy URL"}
+                  </button>
+                  <a
+                    href={targetUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1 rounded-lg bg-mint text-forest-dark font-bold hover:bg-mint-dark transition"
+                  >
+                    Open in Tab ↗
+                  </a>
                 </div>
               </div>
             </div>
 
-            {/* Privacy & Anti-Crowding Notice */}
-            <div className="text-[11px] text-soft max-w-md">
-              <p>
-                <strong className="text-ink">Privacy Protected:</strong> Your phone number is masked and protected according to academic data privacy standards. Please maintain physical distancing while waiting.
+            {/* Printable Poster (White paper format) */}
+            <div className="printable-poster w-full bg-white text-ink rounded-3xl p-8 sm:p-12 shadow-2xl relative flex flex-col items-center text-center border border-line-strong">
+              {/* Institution Seal Badge */}
+              <div className="w-16 h-16 rounded-2xl bg-brand text-white flex items-center justify-center font-black text-2xl shadow-md mb-3 tracking-wider">
+                {activeOrgName
+                  .split(" ")
+                  .map((w) => w[0])
+                  .filter(Boolean)
+                  .slice(0, 3)
+                  .join("")
+                  .toUpperCase() || "UB"}
+              </div>
+
+              <div className="text-xs uppercase tracking-widest font-bold text-brand mb-1">
+                {activeOrgName} • Virtual Queue Entry Point
+              </div>
+
+              <h1 className="text-3xl sm:text-4xl font-extrabold text-ink tracking-tight mb-2">
+                {selectedServiceObj ? selectedServiceObj.name : "Digital Queue Station"}
+              </h1>
+
+              <p className="text-sm sm:text-base text-soft max-w-lg mb-6 leading-relaxed">
+                Skip the crowded physical waiting lines. Scan the QR code below with your phone camera to take your digital ticket and track your spot in real time.
               </p>
-              <p className="text-[10px] text-muted mt-2 font-mono">
-                Powered by Krenox Virtual Queue Engine • University of Buea B.Tech Project
-              </p>
+
+              {/* QR Code Big Container */}
+              <div className="p-4 bg-white border-4 border-brand rounded-3xl shadow-md mb-6">
+                {qrDataUrl && (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={qrDataUrl}
+                    alt="Krenox Queue Ticket QR"
+                    className="w-64 h-64 sm:w-80 sm:h-80 object-contain"
+                  />
+                )}
+              </div>
+
+              {/* Verified Web URL */}
+              <div className="font-mono text-xs text-brand font-bold bg-mint px-4 py-2 rounded-xl border border-line-strong mb-6 max-w-full truncate">
+                {targetUrl}
+              </div>
+
+              {/* 3 Step Instruction Box */}
+              <div className="grid grid-cols-3 gap-4 w-full border-t border-b border-line py-6 mb-6 text-left">
+                <div className="flex gap-3">
+                  <div className="w-8 h-8 rounded-full bg-brand text-white font-bold flex items-center justify-center text-sm flex-shrink-0">
+                    1
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-xs text-ink">Scan Code</h4>
+                    <p className="text-[11px] text-soft">
+                      Open phone camera or QR scanner
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <div className="w-8 h-8 rounded-full bg-brand text-white font-bold flex items-center justify-center text-sm flex-shrink-0">
+                    2
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-xs text-ink">Take Ticket</h4>
+                    <p className="text-[11px] text-soft">
+                      Provide name & WhatsApp number
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <div className="w-8 h-8 rounded-full bg-brand text-white font-bold flex items-center justify-center text-sm flex-shrink-0">
+                    3
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-xs text-ink">Relax & Enter</h4>
+                    <p className="text-[11px] text-soft">
+                      We message you when ready
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Privacy & Anti-Crowding Notice */}
+              <div className="text-[11px] text-soft max-w-md">
+                <p>
+                  <strong className="text-ink">Anti-Crowding System:</strong> Please step away from the entrance door while waiting. You can monitor your live position on your phone.
+                </p>
+                <p className="text-[10px] text-muted mt-2 font-mono">
+                  Powered by Krenox Virtual Queue Engine • University of Buea B.Tech Project
+                </p>
+              </div>
             </div>
           </div>
         </div>

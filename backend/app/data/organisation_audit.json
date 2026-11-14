@@ -1,1 +1,52 @@
-[]
+[
+  {
+    "id": "7b2d3b66-ad50-457d-956d-1314ddae18de",
+    "registration_ref": "KRN-ORG-60284",
+    "action": "COMPLETE_ACCOUNT_SETUP",
+    "actor": "Wisdom",
+    "previous_status": "APPROVED",
+    "new_status": "APPROVED",
+    "reason": "Account credentials configured with email: superadmin@krenox.cm",
+    "created_at": "2026-11-14T20:57:21.368086+00:00"
+  },
+  {
+    "id": "e10b0485-11ef-4df7-855e-789a2b5b86a4",
+    "registration_ref": "KRN-ORG-60284",
+    "action": "APPROVE_ORGANISATION",
+    "actor": "superadmin@krenox.cm",
+    "previous_status": "ACTION_REQUIRED",
+    "new_status": "APPROVED",
+    "reason": "Meets verification criteria",
+    "created_at": "2026-11-14T20:55:25.815191+00:00"
+  },
+  {
+    "id": "1b6f8bb3-79fd-4f05-b394-6ee31314da58",
+    "registration_ref": "KRN-ORG-60284",
+    "action": "REQUEST_ADDITIONAL_INFO",
+    "actor": "superadmin@krenox.cm",
+    "previous_status": "PENDING_REVIEW",
+    "new_status": "ACTION_REQUIRED",
+    "reason": "Tell me more about your services.",
+    "created_at": "2026-11-14T20:54:51.211047+00:00"
+  },
+  {
+    "id": "6d3da09e-529d-4d95-9a36-495e28b0110d",
+    "registration_ref": "KRN-ORG-60284",
+    "action": "VERIFY_CONTACT",
+    "actor": "Wisdom",
+    "previous_status": "PENDING_VERIFICATION",
+    "new_status": "PENDING_REVIEW",
+    "reason": null,
+    "created_at": "2026-11-14T20:47:53.317876+00:00"
+  },
+  {
+    "id": "5f040b54-f212-4fbf-99a9-343dd72f1745",
+    "registration_ref": "KRN-ORG-60284",
+    "action": "START_REGISTRATION",
+    "actor": "Wisdom",
+    "previous_status": null,
+    "new_status": "PENDING_VERIFICATION",
+    "reason": null,
+    "created_at": "2026-11-14T20:47:39.469293+00:00"
+  }
+]

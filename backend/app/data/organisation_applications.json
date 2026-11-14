@@ -1,1 +1,26 @@
-{}
+{
+  "6fbae5d1-9557-4b18-82fa-9f9ad9e404eb": {
+    "id": "6fbae5d1-9557-4b18-82fa-9f9ad9e404eb",
+    "registration_ref": "KRN-ORG-60284",
+    "name": "Buea Bojongo Police",
+    "slug": "buea-bojongo-police",
+    "category": "Government & Public Sector",
+    "contact_name": "Wisdom",
+    "contact_channel": "whatsapp",
+    "contact_value": "671657357",
+    "contact_verified": true,
+    "location": "Buea",
+    "status": "APPROVED",
+    "status_reason": null,
+    "additional_info": null,
+    "created_at": "2026-11-14T20:47:39.468291+00:00",
+    "reviewed_at": "2026-11-14T20:55:25.004140+00:00",
+    "reviewed_by": "superadmin@krenox.cm",
+    "is_account_setup": true,
+    "setup_token": null,
+    "setup_token_expires_at": "2026-11-17T20:55:25.004140+00:00",
+    "admin_email": "superadmin@krenox.cm",
+    "setup_url": "http://localhost:3000/setup-account?token=krn_setup_HcaQkleQMwDnpjlF250NVUnf08s&ref=KRN-ORG-60284",
+    "account_setup_at": "2026-11-14T20:57:21.367070+00:00"
+  }
+}

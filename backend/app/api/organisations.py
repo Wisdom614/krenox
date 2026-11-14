@@ -146,7 +146,16 @@ def get_my_tenant_dashboard(
     """
     org_id = user.metadata.get("organisation_id")
     if not org_id:
-        org_id = "4a15875b-bb27-44ef-a6bf-0312f52d0102"
+        # Check database for any approved organisation
+        first_org = supabase_client.table("organisations").select("id").limit(1).execute()
+        if first_org.data:
+            org_id = first_org.data[0]["id"]
+        else:
+            apps = org_workflow_service._read_apps()
+            if apps:
+                org_id = list(apps.keys())[0]
+            else:
+                raise HTTPException(status_code=404, detail="No active organisation found. Please register an organisation first.")
     return org_workflow_service.get_tenant_dashboard(org_id)
 
 

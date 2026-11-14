@@ -1,6 +1,25 @@
 import { getStoredAccessToken } from "./auth-context";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+export function getApiBase(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== "undefined") {
+    // When accessed from external devices on Wi-Fi/LAN (e.g. mobile phone scanning QR code),
+    // automatically communicate with the host's port 8000
+    if (window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+      return `${window.location.protocol}//${window.location.hostname}:8000`;
+    }
+  }
+  return "http://127.0.0.1:8000";
+}
+
+const API_BASE = "http://127.0.0.1:8000"; // fallback
+
+// Helper for dynamic base url
+function apiUrl(path: string): string {
+  return `${getApiBase()}${path}`;
+}
 
 function getAuthHeaders(): Record<string, string> {
   const token = getStoredAccessToken();
@@ -97,6 +116,8 @@ export type AdminOverview = {
     facilities?: { id: string; name: string; location: string; organisations?: { id: string; name: string; slug: string } };
   })[];
   desks: AdminDesk[];
+  organisations?: Array<{ id: string; name: string; slug: string }>;
+  local_ip?: string;
   stats: {
     total_tickets: number;
     waiting: number;
@@ -110,7 +131,7 @@ export type AdminOverview = {
 
 export async function fetchServices(): Promise<ApiService[]> {
   try {
-    const res = await fetch(`${API_BASE}/queues/services`, { cache: "no-store" });
+    const res = await fetch(`${getApiBase()}/queues/services`, { cache: "no-store" });
     if (!res.ok) throw new Error("Failed to fetch services");
     return await res.json();
   } catch (err) {
@@ -120,7 +141,7 @@ export async function fetchServices(): Promise<ApiService[]> {
 }
 
 export async function sendWhatsAppOtp(phone: string): Promise<{ status: string }> {
-  const res = await fetch(`${API_BASE}/queues/whatsapp/send-otp`, {
+  const res = await fetch(`${getApiBase()}/queues/whatsapp/send-otp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phone }),
@@ -133,7 +154,7 @@ export async function sendWhatsAppOtp(phone: string): Promise<{ status: string }
 }
 
 export async function verifyWhatsAppOtp(phone: string, code: string): Promise<{ status: string }> {
-  const res = await fetch(`${API_BASE}/queues/whatsapp/verify-otp`, {
+  const res = await fetch(`${getApiBase()}/queues/whatsapp/verify-otp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phone, code }),
@@ -152,7 +173,7 @@ export async function joinBackendQueue(payload: {
   reminder_opt_in: boolean;
   notify_threshold?: number;
 }): Promise<ApiTicket> {
-  const res = await fetch(`${API_BASE}/queues/join`, {
+  const res = await fetch(`${getApiBase()}/queues/join`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -165,7 +186,7 @@ export async function joinBackendQueue(payload: {
 }
 
 export async function fetchTicketStatus(ticketId: string): Promise<ApiQueueStatus> {
-  const res = await fetch(`${API_BASE}/queues/ticket/${ticketId}`, { cache: "no-store" });
+  const res = await fetch(`${getApiBase()}/queues/ticket/${ticketId}`, { cache: "no-store" });
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || "Failed to load live ticket status");
@@ -178,7 +199,7 @@ export async function cancelTicket(
   pin?: string,
   reason?: string
 ): Promise<{ status: string; message: string; ticket_id?: string }> {
-  const res = await fetch(`${API_BASE}/queues/ticket/${ticketId}/cancel`, {
+  const res = await fetch(`${getApiBase()}/queues/ticket/${ticketId}/cancel`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pin, reason }),
@@ -195,7 +216,7 @@ export async function postponeTicket(
   positions: number = 3,
   pin?: string
 ): Promise<{ status: string; message: string; positions_delayed: number }> {
-  const res = await fetch(`${API_BASE}/queues/ticket/${ticketId}/postpone`, {
+  const res = await fetch(`${getApiBase()}/queues/ticket/${ticketId}/postpone`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ positions, pin }),
@@ -211,7 +232,7 @@ export async function recoverTicket(
   phoneOrTicket: string,
   pin: string
 ): Promise<{ status: string; ticket_id: string; ticket_number: string; ticket_status: string; redirect_url: string }> {
-  const res = await fetch(`${API_BASE}/queues/recover`, {
+  const res = await fetch(`${getApiBase()}/queues/recover`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phone_or_ticket: phoneOrTicket, pin }),
@@ -226,7 +247,7 @@ export async function recoverTicket(
 // ── Staff Operator Functions ──
 
 export async function fetchStaffQueue(serviceId: string): Promise<StaffQueueState> {
-  const res = await fetch(`${API_BASE}/staff/queue/${serviceId}`, {
+  const res = await fetch(`${getApiBase()}/staff/queue/${serviceId}`, {
     cache: "no-store",
     headers: getAuthHeaders(),
   });
@@ -242,7 +263,7 @@ export async function callNextTicket(
   deskName: string,
   deskId?: string
 ): Promise<{ status: string; ticket: ApiTicket; desk: string; message: string }> {
-  const res = await fetch(`${API_BASE}/staff/call-next`, {
+  const res = await fetch(`${getApiBase()}/staff/call-next`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({
@@ -259,7 +280,7 @@ export async function callNextTicket(
 }
 
 export async function updateTicketStatus(ticketId: string, status: string): Promise<{ status: string; ticket: ApiTicket }> {
-  const res = await fetch(`${API_BASE}/staff/update-status`, {
+  const res = await fetch(`${getApiBase()}/staff/update-status`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({ ticket_id: ticketId, status }),
@@ -272,7 +293,7 @@ export async function updateTicketStatus(ticketId: string, status: string): Prom
 }
 
 export async function fetchStaffDesks(facilityId?: string): Promise<AdminDesk[]> {
-  const url = facilityId ? `${API_BASE}/staff/desks?facility_id=${facilityId}` : `${API_BASE}/staff/desks`;
+  const url = facilityId ? `${getApiBase()}/staff/desks?facility_id=${facilityId}` : `${getApiBase()}/staff/desks`;
   const res = await fetch(url, {
     cache: "no-store",
     headers: getAuthHeaders(),
@@ -285,7 +306,7 @@ export async function fetchStaffDesks(facilityId?: string): Promise<AdminDesk[]>
 }
 
 export async function toggleStaffDesk(deskId: string): Promise<{ status: string; is_open: boolean; desk: AdminDesk }> {
-  const res = await fetch(`${API_BASE}/staff/desks/${deskId}/toggle`, {
+  const res = await fetch(`${getApiBase()}/staff/desks/${deskId}/toggle`, {
     method: "POST",
     headers: getAuthHeaders(),
   });
@@ -303,7 +324,7 @@ export async function transferTicket(
   priority: "normal" | "urgent" = "normal",
   targetDeskId?: string
 ): Promise<{ status: string; message: string; ticket: ApiTicket }> {
-  const res = await fetch(`${API_BASE}/staff/ticket/${ticketId}/transfer`, {
+  const res = await fetch(`${getApiBase()}/staff/ticket/${ticketId}/transfer`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({
@@ -324,7 +345,7 @@ export async function recallTicket(
   ticketId: string,
   deskName: string
 ): Promise<{ status: string; message: string; ticket: ApiTicket }> {
-  const res = await fetch(`${API_BASE}/staff/ticket/${ticketId}/recall`, {
+  const res = await fetch(`${getApiBase()}/staff/ticket/${ticketId}/recall`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({ desk_name: deskName }),
@@ -346,7 +367,7 @@ export async function runSimulation(params: {
   transit_time_mins: number;
   random_seed?: number;
 }): Promise<SimulationResults> {
-  const res = await fetch(`${API_BASE}/simulation/run`, {
+  const res = await fetch(`${getApiBase()}/simulation/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
@@ -361,7 +382,7 @@ export async function runSimulation(params: {
 // ── Admin Functions ──
 
 export async function fetchAdminOverview(): Promise<AdminOverview> {
-  const res = await fetch(`${API_BASE}/admin/overview`, {
+  const res = await fetch(`${getApiBase()}/admin/overview`, {
     cache: "no-store",
     headers: getAuthHeaders(),
   });
@@ -373,7 +394,7 @@ export async function fetchAdminOverview(): Promise<AdminOverview> {
 }
 
 export async function toggleServiceActive(serviceId: string, isActive: boolean): Promise<{ status: string; service: ApiService }> {
-  const res = await fetch(`${API_BASE}/admin/services/toggle`, {
+  const res = await fetch(`${getApiBase()}/admin/services/toggle`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({ service_id: serviceId, is_active: isActive }),
@@ -386,7 +407,7 @@ export async function toggleServiceActive(serviceId: string, isActive: boolean):
 }
 
 export async function toggleDeskOpen(deskId: string, isOpen: boolean): Promise<{ status: string; desk: AdminDesk }> {
-  const res = await fetch(`${API_BASE}/admin/desks/toggle`, {
+  const res = await fetch(`${getApiBase()}/admin/desks/toggle`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({ desk_id: deskId, is_open: isOpen }),
@@ -404,7 +425,7 @@ export async function createService(payload: {
   prefix: string;
   avg_duration_minutes: number;
 }): Promise<{ status: string; service: ApiService }> {
-  const res = await fetch(`${API_BASE}/admin/services`, {
+  const res = await fetch(`${getApiBase()}/admin/services`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify(payload),
@@ -420,7 +441,7 @@ export async function createDesk(payload: {
   facility_id: string;
   name: string;
 }): Promise<{ status: string; desk: AdminDesk }> {
-  const res = await fetch(`${API_BASE}/admin/desks`, {
+  const res = await fetch(`${getApiBase()}/admin/desks`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify(payload),
@@ -487,7 +508,7 @@ export async function registerOrganisation(payload: {
   location: string;
   additional_info?: string;
 }): Promise<OrganisationApplication> {
-  const res = await fetch(`${API_BASE}/organisations/register`, {
+  const res = await fetch(`${getApiBase()}/organisations/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -503,7 +524,7 @@ export async function verifyOrganisationContact(payload: {
   registration_ref: string;
   code: string;
 }): Promise<OrganisationApplication> {
-  const res = await fetch(`${API_BASE}/organisations/verify-contact`, {
+  const res = await fetch(`${getApiBase()}/organisations/verify-contact`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -516,7 +537,7 @@ export async function verifyOrganisationContact(payload: {
 }
 
 export async function fetchOrganisationStatus(reference: string): Promise<OrganisationApplication> {
-  const res = await fetch(`${API_BASE}/organisations/status/${encodeURIComponent(reference)}`, {
+  const res = await fetch(`${getApiBase()}/organisations/status/${encodeURIComponent(reference)}`, {
     cache: "no-store",
   });
   if (!res.ok) {
@@ -530,7 +551,7 @@ export async function resubmitOrganisationApplication(
   reference: string,
   payload: { additional_info: string }
 ): Promise<OrganisationApplication> {
-  const res = await fetch(`${API_BASE}/organisations/resubmit/${encodeURIComponent(reference)}`, {
+  const res = await fetch(`${getApiBase()}/organisations/resubmit/${encodeURIComponent(reference)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -543,7 +564,7 @@ export async function resubmitOrganisationApplication(
 }
 
 export async function fetchAdminOrganisationApplications(): Promise<OrganisationApplication[]> {
-  const res = await fetch(`${API_BASE}/organisations/admin/applications`, {
+  const res = await fetch(`${getApiBase()}/organisations/admin/applications`, {
     headers: getAuthHeaders(),
     cache: "no-store",
   });
@@ -562,7 +583,7 @@ export async function reviewOrganisationApplication(
     initial_facility_name?: string;
   }
 ): Promise<{ status: string; action: string; new_status: string; setup_url?: string; setup_token?: string }> {
-  const res = await fetch(`${API_BASE}/organisations/admin/${orgId}/review`, {
+  const res = await fetch(`${getApiBase()}/organisations/admin/${orgId}/review`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify(payload),
@@ -576,8 +597,8 @@ export async function reviewOrganisationApplication(
 
 export async function fetchOrganisationAuditTrail(ref?: string): Promise<OrganisationAuditEntry[]> {
   const url = ref
-    ? `${API_BASE}/organisations/admin/audit-trail?ref=${encodeURIComponent(ref)}`
-    : `${API_BASE}/organisations/admin/audit-trail`;
+    ? `${getApiBase()}/organisations/admin/audit-trail?ref=${encodeURIComponent(ref)}`
+    : `${getApiBase()}/organisations/admin/audit-trail`;
   const res = await fetch(url, {
     headers: getAuthHeaders(),
     cache: "no-store",
@@ -603,7 +624,7 @@ export type SetupInfo = {
 };
 
 export async function fetchSetupInfo(token: string): Promise<SetupInfo> {
-  const res = await fetch(`${API_BASE}/organisations/setup-info?token=${encodeURIComponent(token)}`, {
+  const res = await fetch(`${getApiBase()}/organisations/setup-info?token=${encodeURIComponent(token)}`, {
     cache: "no-store",
   });
   if (!res.ok) {
@@ -618,7 +639,7 @@ export async function completeAccountSetup(payload: {
   email: string;
   password: string;
 }): Promise<{ status: string; message: string; organisation_name: string; admin_email: string }> {
-  const res = await fetch(`${API_BASE}/organisations/setup-account`, {
+  const res = await fetch(`${getApiBase()}/organisations/setup-account`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -633,7 +654,7 @@ export async function completeAccountSetup(payload: {
 export async function regenerateSetupToken(
   orgId: string
 ): Promise<{ status: string; setup_token: string; setup_url: string; expires_at: string }> {
-  const res = await fetch(`${API_BASE}/organisations/admin/${orgId}/regenerate-setup-token`, {
+  const res = await fetch(`${getApiBase()}/organisations/admin/${orgId}/regenerate-setup-token`, {
     method: "POST",
     headers: getAuthHeaders(),
   });
@@ -678,7 +699,7 @@ export type PublicTenantQueuesResponse = {
 };
 
 export async function fetchPublicDirectory(): Promise<PublicOrganisationSummary[]> {
-  const res = await fetch(`${API_BASE}/organisations/public-directory`, {
+  const res = await fetch(`${getApiBase()}/organisations/public-directory`, {
     cache: "no-store",
   });
   if (!res.ok) {
@@ -688,7 +709,7 @@ export async function fetchPublicDirectory(): Promise<PublicOrganisationSummary[
 }
 
 export async function fetchPublicTenantQueues(slugOrId: string): Promise<PublicTenantQueuesResponse> {
-  const res = await fetch(`${API_BASE}/organisations/public/${encodeURIComponent(slugOrId)}`, {
+  const res = await fetch(`${getApiBase()}/organisations/public/${encodeURIComponent(slugOrId)}`, {
     cache: "no-store",
   });
   if (!res.ok) {
@@ -729,6 +750,7 @@ export type TenantDashboardData = {
     status: string;
     public_url: string;
   };
+  local_ip?: string;
   facilities: TenantFacility[];
   services: ApiService[];
   desks: AdminDesk[];
@@ -746,8 +768,8 @@ export type TenantDashboardData = {
 
 export async function fetchTenantDashboard(orgId?: string): Promise<TenantDashboardData> {
   const url = orgId
-    ? `${API_BASE}/organisations/${encodeURIComponent(orgId)}/dashboard`
-    : `${API_BASE}/organisations/tenant/me`;
+    ? `${getApiBase()}/organisations/${encodeURIComponent(orgId)}/dashboard`
+    : `${getApiBase()}/organisations/tenant/me`;
   const res = await fetch(url, {
     cache: "no-store",
     headers: getAuthHeaders(),
@@ -763,7 +785,7 @@ export async function createTenantFacility(
   orgId: string,
   payload: { name: string; location?: string }
 ): Promise<TenantFacility> {
-  const res = await fetch(`${API_BASE}/organisations/${encodeURIComponent(orgId)}/facilities`, {
+  const res = await fetch(`${getApiBase()}/organisations/${encodeURIComponent(orgId)}/facilities`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify(payload),
@@ -779,7 +801,7 @@ export async function createTenantService(
   orgId: string,
   payload: { facility_id: string; name: string; prefix: string; avg_duration_minutes: number }
 ): Promise<ApiService> {
-  const res = await fetch(`${API_BASE}/organisations/${encodeURIComponent(orgId)}/services`, {
+  const res = await fetch(`${getApiBase()}/organisations/${encodeURIComponent(orgId)}/services`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify(payload),
@@ -795,7 +817,7 @@ export async function createTenantDesk(
   orgId: string,
   payload: { facility_id: string; name: string }
 ): Promise<AdminDesk> {
-  const res = await fetch(`${API_BASE}/organisations/${encodeURIComponent(orgId)}/desks`, {
+  const res = await fetch(`${getApiBase()}/organisations/${encodeURIComponent(orgId)}/desks`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify(payload),
@@ -808,7 +830,7 @@ export async function createTenantDesk(
 }
 
 export async function fetchTenantStaff(orgId: string): Promise<TenantStaff[]> {
-  const res = await fetch(`${API_BASE}/organisations/${encodeURIComponent(orgId)}/staff`, {
+  const res = await fetch(`${getApiBase()}/organisations/${encodeURIComponent(orgId)}/staff`, {
     headers: getAuthHeaders(),
     cache: "no-store",
   });
@@ -823,7 +845,7 @@ export async function createTenantStaff(
   orgId: string,
   payload: { name: string; email: string; password: string }
 ): Promise<TenantStaff> {
-  const res = await fetch(`${API_BASE}/organisations/${encodeURIComponent(orgId)}/staff`, {
+  const res = await fetch(`${getApiBase()}/organisations/${encodeURIComponent(orgId)}/staff`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify(payload),
@@ -839,7 +861,7 @@ export async function updateTenantProfile(
   orgId: string,
   payload: { name?: string; location?: string; additional_info?: string }
 ): Promise<{ status: string; message: string }> {
-  const res = await fetch(`${API_BASE}/organisations/${encodeURIComponent(orgId)}/profile`, {
+  const res = await fetch(`${getApiBase()}/organisations/${encodeURIComponent(orgId)}/profile`, {
     method: "PUT",
     headers: getAuthHeaders(),
     body: JSON.stringify(payload),

@@ -51,9 +51,13 @@ def get_admin_overview(
     completed_count = sum(1 for t in all_tickets if t["status"] == "completed")
     absent_count = sum(1 for t in all_tickets if t["status"] in ["absent", "skipped"])
 
+    orgs_res = supabase_client.table("organisations").select("id, name, slug").execute()
+
     return {
         "services": services_res.data or [],
         "desks": desks_res.data or [],
+        "organisations": orgs_res.data or [],
+        "local_ip": org_workflow_service.get_local_ip(),
         "stats": {
             "total_tickets": len(all_tickets),
             "waiting": waiting_count,

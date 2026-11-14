@@ -3,6 +3,7 @@ import random
 import uuid
 import json
 import os
+import socket
 import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
@@ -23,6 +24,17 @@ os.makedirs(DATA_DIR, exist_ok=True)
 class OrganisationWorkflowService:
     def __init__(self):
         self._load_local_data()
+
+    @staticmethod
+    def get_local_ip() -> str:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
 
     def _load_local_data(self):
         if not os.path.exists(STORE_FILE):
@@ -699,7 +711,20 @@ class OrganisationWorkflowService:
 
         # If not found in local apps, check Supabase organisations
         if not org_id:
-            s_res = supabase_client.table("organisations").select("*").or_(f"slug.eq.{slug_or_id},id.eq.{slug_or_id}").limit(1).execute()
+            import uuid
+            is_uuid = False
+            try:
+                uuid.UUID(str(slug_or_id))
+                is_uuid = True
+            except (ValueError, TypeError):
+                is_uuid = False
+
+            query = supabase_client.table("organisations").select("*")
+            if is_uuid:
+                s_res = query.or_(f"slug.eq.{slug_or_id},id.eq.{slug_or_id}").limit(1).execute()
+            else:
+                s_res = query.eq("slug", slug_or_id).limit(1).execute()
+
             if s_res.data:
                 o = s_res.data[0]
                 org_id = o["id"]
@@ -865,6 +890,7 @@ class OrganisationWorkflowService:
                 "status": org_status,
                 "public_url": f"/q/{org_slug}",
             },
+            "local_ip": self.get_local_ip(),
             "facilities": facilities,
             "services": services,
             "desks": desks,
