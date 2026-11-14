@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: krenox-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: WA_BASE_URL
+        value: https://akg.wisedev.online
+      - key: WA_API_KEY
+        value: wag_HHOZAgSD74TEXvdbutSttNKbJYDCAsMT
+      - key: WA_SESSION_ID
+        value: 9p9jve
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        value: Krenox <verify@wisedev.online>
+      - key: FRONTEND_URL
+        sync: false

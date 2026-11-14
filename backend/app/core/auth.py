@@ -24,7 +24,16 @@ def get_current_user(
 
     token = credentials.credentials
     try:
-        user_response = supabase_client.auth.get_user(token)
+        user_response = None
+        for attempt in range(2):
+            try:
+                user_response = supabase_client.auth.get_user(token)
+                break
+            except Exception as conn_err:
+                if attempt == 0 and ("ConnectionTerminated" in str(conn_err) or "RemoteProtocolError" in str(conn_err)):
+                    continue
+                raise
+
         if not user_response or not user_response.user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
