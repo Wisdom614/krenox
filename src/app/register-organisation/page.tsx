@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Logo } from "@/components/ui";
-import { registerOrganisation, verifyOrganisationContact } from "@/lib/api";
+import { registerOrganisation, verifyOrganisationContact, resendOrganisationCode } from "@/lib/api";
 
 const CATEGORIES = [
   "Healthcare & Medical Facilities",
@@ -37,7 +37,18 @@ export default function RegisterOrganisationPage() {
   const [otpDigits, setOtpDigits] = useState<string[]>(["", "", "", "", "", ""]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resendSuccess, setResendSuccess] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [copiedRef, setCopiedRef] = useState(false);
+
+  // Progressive cooldown countdown timer
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const interval = setInterval(() => {
+      setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [resendCooldown]);
 
   // Confirmation payload
   const [confirmationData, setConfirmationData] = useState<{
@@ -74,6 +85,8 @@ export default function RegisterOrganisationPage() {
 
       setRegRef(res.registration_ref);
       setMaskedContact(res.masked_contact || res.masked_contact_value || res.contact_value || "");
+      setResendCooldown(60);
+      setResendSuccess(null);
       setStep(2);
       setTimeout(() => otpInputsRef.current[0]?.focus(), 150);
     } catch (err: unknown) {
@@ -153,19 +166,16 @@ export default function RegisterOrganisationPage() {
   }
 
   async function handleResendCode() {
+    if (resendCooldown > 0 || isSubmitting || !regRef) return;
     setError(null);
+    setResendSuccess(null);
     setIsSubmitting(true);
     try {
-      await registerOrganisation({
-        name: name.trim(),
-        category,
-        contact_name: contactName.trim(),
-        contact_channel: channel,
-        contact_value: contactValue.trim(),
-        location: location.trim(),
-        additional_info: additionalInfo.trim() || undefined,
-      });
-      setError("A new 6-digit verification code has been dispatched.");
+      const res = await resendOrganisationCode({ registration_ref: regRef });
+      setResendSuccess(res.message || "A fresh 6-digit verification code has been dispatched.");
+      setResendCooldown(res.cooldown_seconds || 60);
+      setOtpDigits(["", "", "", "", "", ""]);
+      setTimeout(() => otpInputsRef.current[0]?.focus(), 120);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to resend code";
       setError(msg);
@@ -556,6 +566,15 @@ export default function RegisterOrganisationPage() {
                   <span className="font-mono font-bold text-forest">{maskedContact}</span>.
                 </p>
 
+                {resendSuccess && (
+                  <div className="mt-4 rounded-xl bg-emerald-50 p-3 text-xs font-semibold text-emerald-800 border border-emerald-200 flex items-center justify-center gap-2">
+                    <svg className="w-4 h-4 text-emerald-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>{resendSuccess}</span>
+                  </div>
+                )}
+
                 {error && (
                   <div className="mt-4 rounded-xl bg-red-50 p-3 text-xs font-semibold text-red-700 border border-red-200">
                     {error}
@@ -582,22 +601,38 @@ export default function RegisterOrganisationPage() {
                   ))}
                 </div>
 
-                {/* Actions */}
-                <div className="mt-7 flex items-center justify-between text-xs text-soft max-w-xs mx-auto">
+                {/* Actions with progressive countdown */}
+                <div className="mt-7 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-soft max-w-sm mx-auto">
                   <button
                     type="button"
                     onClick={handleResendCode}
-                    disabled={isSubmitting}
-                    className="font-bold text-forest underline hover:opacity-80 transition cursor-pointer"
+                    disabled={resendCooldown > 0 || isSubmitting}
+                    className={`font-semibold transition flex items-center gap-1.5 ${
+                      resendCooldown > 0 || isSubmitting
+                        ? "text-soft/60 cursor-not-allowed"
+                        : "text-forest hover:text-forest-dark underline cursor-pointer"
+                    }`}
                   >
-                    Resend Code
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>
+                      {resendCooldown > 0
+                        ? `Resend code in ${resendCooldown}s`
+                        : "Resend verification code"}
+                    </span>
                   </button>
+
                   <button
                     type="button"
-                    onClick={() => setStep(1)}
-                    className="hover:text-ink transition cursor-pointer"
+                    onClick={() => {
+                      setError(null);
+                      setResendSuccess(null);
+                      setStep(1);
+                    }}
+                    className="hover:text-ink transition cursor-pointer flex items-center gap-1"
                   >
-                    Edit Phone/Email
+                    <span>← Edit contact details</span>
                   </button>
                 </div>
 

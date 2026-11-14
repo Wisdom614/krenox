@@ -129,8 +129,19 @@ class EmailService:
         """
         return await self.send_email(to, subject, html)
 
-    async def send_approval_with_setup_token(self, to: str, org_name: str, ref: str, setup_url: str, setup_token: str) -> Dict[str, Any]:
+    async def send_approval_with_setup_token(
+        self,
+        to: str,
+        org_name: str,
+        ref: str,
+        setup_url: str,
+        setup_token: str,
+        poster_url: Optional[str] = None,
+        portal_url: Optional[str] = None
+    ) -> Dict[str, Any]:
         subject = f"Registration Approved: Set Up Your Account for {org_name}"
+        clean_portal = portal_url or "https://krenox.vercel.app/login"
+        clean_poster = poster_url or f"https://krenox.vercel.app/poster/{ref.lower()}"
         html = f"""
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 32px 24px; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0;">
           <div style="margin-bottom: 24px; border-bottom: 1px solid #f1f5f9; padding-bottom: 16px;">
@@ -147,10 +158,18 @@ class EmailService:
             You can now create your administrator password and start configuring service desks and queue counters.
           </p>
 
-          <div style="text-align: center; margin: 28px 0;">
-            <a href="{setup_url}" style="background-color: #059669; color: #ffffff; padding: 14px 28px; font-size: 14px; font-weight: 700; text-decoration: none; border-radius: 9999px; display: inline-block; box-shadow: 0 4px 12px rgba(5,150,105,0.25);">
+          <div style="text-align: center; margin: 24px 0;">
+            <a href="{setup_url}" style="background-color: #084d56; color: #ffffff; padding: 14px 28px; font-size: 14px; font-weight: 700; text-decoration: none; border-radius: 9999px; display: inline-block; box-shadow: 0 4px 12px rgba(8,77,86,0.25);">
               Set Up Administrator Account →
             </a>
+          </div>
+
+          <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin-bottom: 20px; font-size: 13px; color: #166534;">
+            <p style="margin: 0 0 6px 0; font-weight: 700;">📄 Printable Entrance QR Poster:</p>
+            <p style="margin: 0 0 8px 0; font-size: 12px; color: #15803d;">
+              Mount this official poster at your facility door so visitors can scan and queue:
+            </p>
+            <a href="{clean_poster}" style="color: #166534; font-weight: 700; text-decoration: underline; word-break: break-all;">{clean_poster}</a>
           </div>
 
           <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 24px; font-size: 12px; color: #64748b;">
@@ -159,13 +178,13 @@ class EmailService:
               {setup_token}
             </div>
             <p style="margin: 8px 0 0 0; font-size: 11px;">
-              Direct Link: <a href="{setup_url}" style="color: #059669; word-break: break-all;">{setup_url}</a>
+              Direct Link: <a href="{setup_url}" style="color: #084d56; word-break: break-all;">{setup_url}</a>
             </p>
             <p style="margin: 4px 0 0 0; font-size: 11px; color: #94a3b8;">
               This setup link is single-use and will expire in 72 hours.
             </p>
             <p style="margin: 10px 0 0 0; font-size: 12px; color: #334155; border-top: 1px dashed #cbd5e1; padding-top: 8px;">
-              <strong>Staff & Admin Portal Login:</strong> Bookmark <a href="http://localhost:3000/login" style="color: #059669; font-weight: 600;">http://localhost:3000/login</a> for daily counter operations.
+              <strong>Staff & Admin Portal Login:</strong> Bookmark <a href="{clean_portal}" style="color: #084d56; font-weight: 600;">{clean_portal}</a> for daily counter operations.
             </p>
           </div>
 

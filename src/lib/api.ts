@@ -541,6 +541,21 @@ export async function verifyOrganisationContact(payload: {
   return await res.json();
 }
 
+export async function resendOrganisationCode(payload: {
+  registration_ref: string;
+}): Promise<{ status: string; message: string; resend_count: number; cooldown_seconds: number }> {
+  const res = await fetch(`${getApiBase()}/organisations/resend-code`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to resend code");
+  }
+  return await res.json();
+}
+
 export async function fetchOrganisationStatus(reference: string): Promise<OrganisationApplication> {
   const res = await fetch(`${getApiBase()}/organisations/status/${encodeURIComponent(reference)}`, {
     cache: "no-store",

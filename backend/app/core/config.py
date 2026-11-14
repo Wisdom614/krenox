@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     WA_SESSION_ID: str = "9p9jve"
 
     # Resend Email Settings
-    RESEND_API_KEY: Optional[str] = None
-    RESEND_FROM_EMAIL: str = "Krenox <verify@wisedev.online>"
+    RESEND_API_KEY: Optional[str] = os.getenv("RESEND_API_KEY", None)
+    RESEND_FROM_EMAIL: str = os.getenv("RESEND_FROM_EMAIL", "Krenox <verify@wisedev.online>")
 
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "https://krenox.vercel.app")
     PORT: int = 8000

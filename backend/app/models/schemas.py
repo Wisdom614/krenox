@@ -47,6 +47,9 @@ class VerifyOrganisationContactRequest(BaseModel):
     registration_ref: str
     code: str = Field(min_length=4, max_length=8)
 
+class ResendOrganisationCodeRequest(BaseModel):
+    registration_ref: str
+
 class OrganisationApplicationResponse(BaseModel):
     id: str
     registration_ref: str

@@ -284,6 +284,78 @@ class OrganisationWorkflowService:
             "body": "Your contact information has been verified, and your registration has been forwarded to the Krenox administration team for review. We expect to get back to you within 1 hour."
         }
 
+    async def resend_verification_code(self, ref: str) -> Dict[str, Any]:
+        """
+        Resends a new 6-digit verification code to the registered contact channel
+        for an existing registration reference, with progressive cooldown (60s, 120s, 180s...).
+        """
+        apps = self._read_apps()
+        target = None
+        for app in apps.values():
+            if app.get("registration_ref") == ref:
+                target = app
+                break
+
+        if not target:
+            raise HTTPException(status_code=404, detail="Registration reference not found.")
+
+        if target.get("status") != "PENDING_VERIFICATION":
+            raise HTTPException(status_code=400, detail="This application is already verified or reviewed.")
+
+        verifs = self._read_verifs()
+        verif = verifs.get(ref, {})
+
+        # Check progressive rate limit (60s, 120s, 180s, etc.)
+        resend_count = verif.get("resend_count", 0)
+        cooldown_seconds = min(60 * (resend_count + 1), 300)
+        last_sent = verif.get("last_sent_at")
+
+        if last_sent:
+            try:
+                elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(last_sent)).total_seconds()
+                if elapsed < cooldown_seconds:
+                    remaining = int(cooldown_seconds - elapsed)
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"Please wait {remaining} seconds before requesting another code."
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                pass
+
+        # Generate fresh 6-digit code
+        new_code = f"{random.randint(100000, 999999)}"
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+
+        verifs[ref] = {
+            "code": new_code,
+            "expires_at": expires_at.isoformat(),
+            "attempts": 0,
+            "channel": target["contact_channel"],
+            "value": target["contact_value"],
+            "resend_count": resend_count + 1,
+            "last_sent_at": datetime.now(timezone.utc).isoformat()
+        }
+        self._write_verifs(verifs)
+
+        # Dispatch code
+        if target["contact_channel"] == "whatsapp":
+            digits = re.sub(r"\D", "", target["contact_value"])
+            if len(digits) == 9 and digits.startswith("6"):
+                digits = f"237{digits}"
+            await whatsapp_service.send_verification_otp(digits, new_code)
+        else:
+            await email_service.send_verification_otp(target["contact_value"], new_code, target["name"])
+
+        next_cooldown = min(60 * (resend_count + 2), 300)
+        return {
+            "status": "resent",
+            "message": f"A new verification code has been dispatched to {self.mask_contact(target['contact_channel'], target['contact_value'])}.",
+            "resend_count": resend_count + 1,
+            "cooldown_seconds": next_cooldown
+        }
+
     def get_application_status(self, ref: str) -> Dict[str, Any]:
         apps = self._read_apps()
         for app in apps.values():
@@ -418,7 +490,9 @@ class OrganisationWorkflowService:
                         target["name"],
                         ref,
                         setup_url,
-                        setup_token
+                        setup_token,
+                        poster_url=poster_url,
+                        portal_url=f"{base_frontend}/login"
                     )
                 except Exception as e:
                     print(f"Notice: Email notification error: {e}")

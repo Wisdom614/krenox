@@ -3,6 +3,7 @@ from typing import List, Optional
 from app.models.schemas import (
     RegisterOrganisationRequest,
     VerifyOrganisationContactRequest,
+    ResendOrganisationCodeRequest,
     OrganisationApplicationResponse,
     AdminReviewPayload,
     ResubmitApplicationPayload,
@@ -34,6 +35,14 @@ async def verify_contact(payload: VerifyOrganisationContactRequest):
     Step 2: Verify the 6-digit contact code and advance status to PENDING_REVIEW.
     """
     return await org_workflow_service.verify_contact(payload.registration_ref, payload.code)
+
+@router.post("/resend-code")
+async def resend_contact_code(payload: ResendOrganisationCodeRequest):
+    """
+    Resends a new 6-digit verification code to the registered contact channel
+    with progressive cooldown rate limiting.
+    """
+    return await org_workflow_service.resend_verification_code(payload.registration_ref.strip().upper())
 
 @router.get("/status/{reference}", response_model=OrganisationApplicationResponse)
 def get_organisation_status(reference: str):
