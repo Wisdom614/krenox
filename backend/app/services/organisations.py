@@ -356,11 +356,20 @@ class OrganisationWorkflowService:
             # Generate single-use setup token for account configuration (72 hours)
             setup_token = f"krn_setup_{secrets.token_urlsafe(20)}"
             setup_token_expires_at = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
-            setup_url = f"{settings.FRONTEND_URL}/setup-account?token={setup_token}&ref={ref}"
+            
+            # Resolve base frontend URL (prioritise production Vercel frontend)
+            base_frontend = (settings.FRONTEND_URL or "https://krenox.vercel.app").rstrip("/")
+            if "localhost" in base_frontend and os.getenv("RENDER"):
+                base_frontend = "https://krenox.vercel.app"
+
+            setup_url = f"{base_frontend}/setup-account?ref={ref}"
+            poster_url = f"{base_frontend}/poster/{target['slug']}"
+            queue_url = f"{base_frontend}/q/{target['slug']}"
 
             target["setup_token"] = setup_token
             target["setup_token_expires_at"] = setup_token_expires_at
             target["setup_url"] = setup_url
+            target["poster_url"] = poster_url
             target["is_account_setup"] = False
 
             # Create or ensure organisation & facility exist in Supabase for live queues
@@ -381,14 +390,22 @@ class OrganisationWorkflowService:
 
             self._log_audit(ref, "APPROVE_ORGANISATION", actor, prev_status, "APPROVED", reason or "Meets verification criteria")
 
-            # Notification with Setup Link
+            # Notification with Setup Link & Official Poster Link
             if target["contact_channel"] == "whatsapp":
                 digits = re.sub(r"\D", "", target["contact_value"])
                 if len(digits) == 9 and digits.startswith("6"):
                     digits = f"237{digits}"
                 msg = (
-                    f"Krenox: Congratulations! Your organisation '{target['name']}' has been APPROVED. "
-                    f"Set up your administrator credentials here: {setup_url}"
+                    f"🎉 *Krenox: Organisation Approved!*\n\n"
+                    f"Congratulations! *{target['name']}* has been officially APPROVED on the Krenox Virtual Queue network.\n\n"
+                    f"📄 *Printable Entrance QR Poster:*\n"
+                    f"{poster_url}\n"
+                    f"_(Ready to print & mount at your facility entrance!)_\n\n"
+                    f"⚙️ *Set Up Admin Credentials:*\n"
+                    f"{setup_url}\n\n"
+                    f"🎟️ *Public Queue Link:*\n"
+                    f"{queue_url}\n\n"
+                    f"Welcome to line-free customer service!"
                 )
                 try:
                     await whatsapp_service.send_whatsapp_message(digits, msg)
@@ -492,15 +509,15 @@ class OrganisationWorkflowService:
 
     def get_setup_info(self, token: str) -> Dict[str, Any]:
         """
-        Validates account setup token and returns tenant configuration preview.
+        Validates account setup token (or registration_ref) and returns tenant configuration preview.
         """
-        if not token or len(token.strip()) < 10:
-            raise HTTPException(status_code=400, detail="Invalid account setup token.")
+        if not token or len(token.strip()) < 5:
+            raise HTTPException(status_code=400, detail="Invalid account setup link or reference.")
 
         apps = self._read_apps()
         target = None
         for app in apps.values():
-            if app.get("setup_token") == token.strip():
+            if app.get("setup_token") == token.strip() or app.get("registration_ref") == token.strip():
                 target = app
                 break
 
@@ -546,7 +563,7 @@ class OrganisationWorkflowService:
         apps = self._read_apps()
         target = None
         for app in apps.values():
-            if app.get("setup_token") == token:
+            if app.get("setup_token") == token or app.get("registration_ref") == token:
                 target = app
                 break
 

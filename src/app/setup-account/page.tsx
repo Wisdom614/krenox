@@ -10,7 +10,7 @@ import { fetchSetupInfo, completeAccountSetup, SetupInfo } from "@/lib/api";
 function SetupAccountForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const urlToken = searchParams.get("token") || "";
+  const urlToken = searchParams.get("ref") || searchParams.get("token") || "";
 
   const { signIn } = useAuth();
 

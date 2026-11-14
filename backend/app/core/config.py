@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     RESEND_API_KEY: Optional[str] = None
     RESEND_FROM_EMAIL: str = "Krenox <verify@wisedev.online>"
 
-    FRONTEND_URL: str = "http://localhost:3000"
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "https://krenox.vercel.app")
     PORT: int = 8000
 
     class Config:
