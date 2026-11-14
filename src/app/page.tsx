@@ -82,6 +82,12 @@ export default function Home() {
               Evaluation & Simulation
             </Link>
             <Link
+              href="/admin"
+              className="hidden transition hover:text-white md:block text-xs font-bold text-[#38bdf8]"
+            >
+              Admin & QR Kiosks
+            </Link>
+            <Link
               href="/staff"
               className="inline-flex items-center justify-center rounded-full border border-white/30 bg-white/10 px-5 py-2.5 text-sm font-bold text-white backdrop-blur transition hover:bg-white/20"
             >
@@ -287,7 +293,18 @@ export default function Home() {
       <footer className="px-6 py-8 text-sm text-soft">
         <div className="mx-auto flex max-w-7xl flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <span>© 2026 Krenox. All rights reserved.</span>
-          <span>B.Tech Project · University of Buea</span>
+          <div className="flex items-center gap-6">
+            <Link href="/admin" className="hover:text-ink transition font-medium text-xs">
+              Admin Kiosks & QR
+            </Link>
+            <Link href="/staff" className="hover:text-ink transition font-medium text-xs">
+              Staff Console
+            </Link>
+            <Link href="/simulation" className="hover:text-ink transition font-medium text-xs">
+              Simulation Study
+            </Link>
+            <span className="text-xs">B.Tech Project · University of Buea</span>
+          </div>
         </div>
       </footer>
 

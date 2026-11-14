@@ -38,6 +38,7 @@ export default function SimulationPage() {
     }
   }
 
+  // Run automatically on first load to showcase baseline data
   useEffect(() => {
     let ignore = false;
     runSimulation({
@@ -99,18 +100,9 @@ export default function SimulationPage() {
           </div>
 
           <div className="flex items-center gap-4">
-            <Link
-              href="/"
-              className="text-xs font-semibold text-soft hover:text-ink transition underline underline-offset-4"
-            >
-              Public Home ↗
-            </Link>
-            <Link
-              href="/staff"
-              className="text-xs font-semibold text-soft hover:text-ink transition underline underline-offset-4"
-            >
-              Staff Console ↗
-            </Link>
+            <Link href="/admin" className="text-xs font-semibold text-soft hover:text-brand transition">Admin & Kiosks</Link>
+            <Link href="/staff" className="text-xs font-semibold text-soft hover:text-brand transition">Staff Console</Link>
+            <Link href="/" className="text-xs font-semibold text-soft hover:text-ink transition underline underline-offset-4">Public Home ↗</Link>
           </div>
         </div>
       </header>

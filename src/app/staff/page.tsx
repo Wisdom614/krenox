@@ -31,6 +31,7 @@ export default function StaffPage() {
     });
   }, []);
 
+  // Poll queue state every 3.5 seconds
   const refreshQueue = useCallback(async () => {
     if (!selectedServiceId) return;
     try {
@@ -47,15 +48,22 @@ export default function StaffPage() {
     if (selectedServiceId) {
       fetchStaffQueue(selectedServiceId)
         .then((data) => {
-          if (active) setQueueState(data);
+          if (active) {
+            setQueueState(data);
+            setErrorMessage("");
+          }
         })
         .catch(() => {});
     }
+
     const interval = setInterval(() => {
       if (selectedServiceId && active) {
         fetchStaffQueue(selectedServiceId)
           .then((data) => {
-            if (active) setQueueState(data);
+            if (active) {
+              setQueueState(data);
+              setErrorMessage("");
+            }
           })
           .catch(() => {});
       }
@@ -131,10 +139,22 @@ export default function StaffPage() {
               </select>
             </div>
             <Link
+              href="/admin"
+              className="text-xs font-semibold text-soft hover:text-brand transition"
+            >
+              Admin & Kiosks
+            </Link>
+            <Link
+              href="/simulation"
+              className="text-xs font-semibold text-soft hover:text-brand transition"
+            >
+              Simulation
+            </Link>
+            <Link
               href="/"
               className="text-xs font-semibold text-soft hover:text-ink transition underline underline-offset-4"
             >
-              Public Queue Page ↗
+              Public Queue ↗
             </Link>
           </div>
         </div>
@@ -356,3 +376,4 @@ export default function StaffPage() {
     </main>
   );
 }
+

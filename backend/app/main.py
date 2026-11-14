@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from app.core.security import limiter
-from app.api import queues, staff, simulation
+from app.api import queues, staff, simulation, admin
 
 app = FastAPI(
     title="Krenox API",
@@ -28,6 +28,7 @@ app.add_middleware(
 app.include_router(queues.router)
 app.include_router(staff.router)
 app.include_router(simulation.router)
+app.include_router(admin.router)
 
 @app.get("/")
 def health_check():

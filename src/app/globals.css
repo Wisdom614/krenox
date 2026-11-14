@@ -41,3 +41,30 @@ h1, h2, h3 { font-family: var(--nf-display), system-ui, sans-serif; }
 .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
 .reveal.is-visible { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
+
+@media print {
+  body {
+    background: white !important;
+    color: #102a36 !important;
+  }
+  body * {
+    visibility: hidden;
+  }
+  .printable-poster, .printable-poster * {
+    visibility: visible;
+  }
+  .printable-poster {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100vw;
+    margin: 0;
+    padding: 1.5rem;
+    background: white !important;
+    color: #102a36 !important;
+    box-shadow: none !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

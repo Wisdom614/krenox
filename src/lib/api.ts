@@ -68,6 +68,27 @@ export type SimulationResults = {
   };
 };
 
+export type AdminDesk = {
+  id: string;
+  facility_id: string;
+  name: string;
+  is_open: boolean;
+};
+
+export type AdminOverview = {
+  services: (ApiService & {
+    facilities?: { id: string; name: string; location: string; organisations?: { id: string; name: string; slug: string } };
+  })[];
+  desks: AdminDesk[];
+  stats: {
+    total_tickets: number;
+    waiting: number;
+    serving: number;
+    completed: number;
+    absent_or_skipped: number;
+  };
+};
+
 // ── Customer Queue Functions ──
 
 export async function fetchServices(): Promise<ApiService[]> {
@@ -187,6 +208,68 @@ export async function runSimulation(params: {
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || "Simulation run failed");
+  }
+  return await res.json();
+}
+
+// ── Admin Functions ──
+
+export async function fetchAdminOverview(): Promise<AdminOverview> {
+  const res = await fetch(`${API_BASE}/admin/overview`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Failed to load admin overview");
+  return await res.json();
+}
+
+export async function toggleServiceActive(serviceId: string, isActive: boolean): Promise<{ status: string; service: ApiService }> {
+  const res = await fetch(`${API_BASE}/admin/services/toggle`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ service_id: serviceId, is_active: isActive }),
+  });
+  if (!res.ok) throw new Error("Failed to toggle service");
+  return await res.json();
+}
+
+export async function toggleDeskOpen(deskId: string, isOpen: boolean): Promise<{ status: string; desk: AdminDesk }> {
+  const res = await fetch(`${API_BASE}/admin/desks/toggle`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ desk_id: deskId, is_open: isOpen }),
+  });
+  if (!res.ok) throw new Error("Failed to toggle desk");
+  return await res.json();
+}
+
+export async function createService(payload: {
+  facility_id: string;
+  name: string;
+  prefix: string;
+  avg_duration_minutes: number;
+}): Promise<{ status: string; service: ApiService }> {
+  const res = await fetch(`${API_BASE}/admin/services`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to create service");
+  }
+  return await res.json();
+}
+
+export async function createDesk(payload: {
+  facility_id: string;
+  name: string;
+}): Promise<{ status: string; desk: AdminDesk }> {
+  const res = await fetch(`${API_BASE}/admin/desks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to create desk");
   }
   return await res.json();
 }
