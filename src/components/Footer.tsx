@@ -111,6 +111,23 @@ export function Footer({ className = "" }: FooterProps) {
                 </Link>
               </li>
               <li>
+                <Link
+                  href="/login"
+                  className="hover:text-mint text-white font-bold transition-colors flex items-center gap-1"
+                >
+                  <span>Staff & Admin Sign In</span>
+                  <span>→</span>
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/staff"
+                  className="hover:text-mint transition-colors"
+                >
+                  Counter Operator Station
+                </Link>
+              </li>
+              <li>
                 <span className="text-white/70">1-Hour Administrative Review</span>
               </li>
               <li>

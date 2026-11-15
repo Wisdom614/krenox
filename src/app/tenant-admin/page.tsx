@@ -330,7 +330,7 @@ export default function TenantAdminPage() {
               Open Staff Counter
             </Link>
 
-            {role === "admin" && (
+            {role === "super_admin" && (
               <Link
                 href="/admin"
                 className="text-xs font-semibold text-ink-muted hover:text-forest transition hidden sm:inline"

@@ -62,9 +62,14 @@ def require_role(allowed_roles: List[str]):
     """
     Factory dependency checking that the authenticated user possesses an authorized role.
     E.g. require_role(["admin"]) or require_role(["staff", "admin"])
+    Automatically expands "admin" to accept "tenant_admin" and "super_admin".
     """
+    expanded_roles = set(allowed_roles)
+    if "admin" in expanded_roles:
+        expanded_roles.update(["tenant_admin", "super_admin"])
+
     def role_checker(user: AuthenticatedUser = Depends(get_current_user)) -> AuthenticatedUser:
-        if user.role not in allowed_roles:
+        if user.role not in expanded_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access denied. Required role: {', '.join(allowed_roles)}. Your current role is '{user.role}'."

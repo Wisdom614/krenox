@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/ui";
+import { useAuth } from "@/lib/auth-context";
 
 interface NavbarProps {
   onTakeTicket?: () => void;
@@ -21,6 +22,7 @@ export function Navbar({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const pathname = usePathname();
+  const { user, role, dashboardRoute } = useAuth();
 
   // Scroll detection for sticky header backdrop
   useEffect(() => {
@@ -119,6 +121,32 @@ export function Navbar({
             >
               Track Application
             </Link>
+
+            {user ? (
+              <Link
+                href={dashboardRoute}
+                className={`transition-colors ${textMuted} flex items-center gap-1.5 font-bold`}
+              >
+                <span className="w-2 h-2 rounded-full bg-mint animate-pulse" />
+                <span>
+                  {role === "tenant_admin"
+                    ? "Admin Console"
+                    : role === "super_admin"
+                    ? "Super Admin"
+                    : "Staff Console"}
+                </span>
+              </Link>
+            ) : (
+              <Link
+                href="/login"
+                className={`transition-colors ${textMuted} flex items-center gap-1.5`}
+              >
+                <svg className="w-3.5 h-3.5 text-mint" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                </svg>
+                <span>Staff Portal</span>
+              </Link>
+            )}
           </nav>
 
           {/* Desktop Right Action CTA */}
@@ -265,9 +293,44 @@ export function Navbar({
 
               <div className="pt-3 pb-1 border-t border-line my-3">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-soft px-3.5">
-                  Organisations & Facilities
+                  Staff & Operations
                 </span>
               </div>
+
+              {user ? (
+                <Link
+                  href={dashboardRoute}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex items-center justify-between p-3.5 rounded-2xl bg-forest text-white font-bold text-sm shadow-xs transition"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-2 h-2 rounded-full bg-mint animate-pulse" />
+                    <span>
+                      Open{" "}
+                      {role === "tenant_admin"
+                        ? "Organisation Admin"
+                        : role === "super_admin"
+                        ? "Super Admin"
+                        : "Counter Console"}
+                    </span>
+                  </div>
+                  <span>→</span>
+                </Link>
+              ) : (
+                <Link
+                  href="/login"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex items-center justify-between p-3.5 rounded-2xl hover:bg-surface-sunken font-bold text-sm text-ink transition"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <svg className="w-4 h-4 text-forest" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                    </svg>
+                    <span>Staff & Admin Sign In</span>
+                  </div>
+                  <span className="text-soft">→</span>
+                </Link>
+              )}
 
               <Link
                 href="/register-organisation"

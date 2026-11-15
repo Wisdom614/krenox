@@ -11,14 +11,18 @@ import {
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 
-export type UserRole = "admin" | "staff" | null;
+export type UserRole = "super_admin" | "tenant_admin" | "staff" | "admin" | null;
 
 interface AuthContextType {
   user: User | null;
   session: Session | null;
   role: UserRole;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ user: User; role: UserRole }>;
+  organisationId: string | null;
+  organisationName: string | null;
+  displayName: string;
+  dashboardRoute: string;
+  signIn: (email: string, password: string) => Promise<{ user: User; role: UserRole; dashboardRoute: string }>;
   signOut: () => Promise<void>;
 }
 
@@ -27,6 +31,10 @@ const AuthContext = createContext<AuthContextType>({
   session: null,
   role: null,
   loading: true,
+  organisationId: null,
+  organisationName: null,
+  displayName: "Staff Member",
+  dashboardRoute: "/staff",
   signIn: async () => {
     throw new Error("AuthProvider not mounted");
   },
@@ -64,10 +72,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const extractRole = (u: User | null): UserRole => {
     if (!u) return null;
     const r = u.user_metadata?.role;
-    if (r === "admin") return "admin";
-    if (r === "staff") return "staff";
-    return "staff"; // Default fallback role
+    const orgId = u.user_metadata?.organisation_id;
+
+    // Tenant administrator: explicitly tenant_admin, or admin with an organisation_id attached
+    if (r === "tenant_admin" || (r === "admin" && orgId)) {
+      return "tenant_admin";
+    }
+    // Platform super administrator (platform owner review console)
+    if (r === "super_admin" || (r === "admin" && !orgId)) {
+      return "super_admin";
+    }
+    if (r === "staff") {
+      return "staff";
+    }
+    return "staff";
   };
+
+  const getDashboardRouteForRole = (r: UserRole): string => {
+    if (r === "super_admin") return "/admin";
+    if (r === "tenant_admin") return "/tenant-admin";
+    return "/staff";
+  };
+
+  const organisationId = user?.user_metadata?.organisation_id || null;
+  const organisationName = user?.user_metadata?.organisation_name || null;
+  const displayName =
+    user?.user_metadata?.contact_name ||
+    user?.user_metadata?.name ||
+    (user?.email ? user.email.split("@")[0] : "Staff Member");
+  const dashboardRoute = getDashboardRouteForRole(role);
 
   useEffect(() => {
     let active = true;
@@ -122,13 +155,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const assignedRole = extractRole(data.user);
+    const targetRoute = getDashboardRouteForRole(assignedRole);
     setUser(data.user);
     setSession(data.session);
     setRole(assignedRole);
     setStoredAccessToken(data.session.access_token);
     setLoading(false);
 
-    return { user: data.user, role: assignedRole };
+    return { user: data.user, role: assignedRole, dashboardRoute: targetRoute };
   }, []);
 
   const signOut = useCallback(async () => {
@@ -146,6 +180,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         role,
         loading,
+        organisationId,
+        organisationName,
+        displayName,
+        dashboardRoute,
         signIn,
         signOut,
       }}

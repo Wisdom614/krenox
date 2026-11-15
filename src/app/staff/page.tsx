@@ -363,27 +363,33 @@ export default function StaffPage() {
               </button>
             </div>
 
-            {role === "admin" && (
+            {role === "tenant_admin" && (
               <Link
-                href="/admin"
-                className="text-xs font-semibold text-ink-muted hover:text-forest transition hidden md:inline"
+                href="/tenant-admin"
+                className="text-xs font-bold text-forest bg-forest/10 hover:bg-forest/20 px-3 py-1.5 rounded-xl transition"
               >
-                Admin Overview
+                🏢 Organisation Admin →
               </Link>
             )}
 
-            <Link
-              href="/simulation"
-              className="text-xs font-semibold text-ink-muted hover:text-forest transition hidden md:inline"
-            >
-              Simulation Engine
-            </Link>
+            {role === "super_admin" && (
+              <Link
+                href="/admin"
+                className="text-xs font-bold text-forest bg-forest/10 hover:bg-forest/20 px-3 py-1.5 rounded-xl transition"
+              >
+                ⚙️ Super Admin →
+              </Link>
+            )}
 
             <div className="flex items-center gap-2.5 pl-3 border-l border-line">
               <div className="text-right hidden sm:block">
                 <div className="text-[11px] font-bold text-ink leading-tight">{user.email}</div>
                 <div className="text-[10px] text-forest font-bold uppercase tracking-wider">
-                  {role === "admin" ? "Administrator" : "Counter Operator"}
+                  {role === "tenant_admin"
+                    ? "Organisation Admin"
+                    : role === "super_admin"
+                    ? "Platform Admin"
+                    : "Counter Operator"}
                 </div>
               </div>
               <button
