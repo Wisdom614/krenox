@@ -81,12 +81,16 @@ export default function StaffPage() {
     }
   }, []);
 
-  // Route Guard: enforce authentication
+  // Route Guard: staff operations are not the platform-admin landing page.
   useEffect(() => {
-    if (!authLoading && !user) {
-      router.push("/login?redirect=/staff");
+    if (authLoading) return;
+
+    if (!user) {
+      router.replace("/login?redirect=/staff");
+    } else if (role === "super_admin") {
+      router.replace("/admin");
     }
-  }, [authLoading, user, router]);
+  }, [authLoading, user, role, router]);
 
   // Load configured desks
   useEffect(() => {
