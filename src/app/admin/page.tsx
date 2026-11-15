@@ -62,7 +62,7 @@ export default function AdminPage() {
     if (!authLoading) {
       if (!user) {
         router.push("/login?redirect=/admin");
-      } else if (role !== "admin") {
+      } else if (role !== "super_admin") {
         router.push("/staff");
       }
     }
@@ -107,7 +107,7 @@ export default function AdminPage() {
 
   // Load Data
   const loadOverview = useCallback(async () => {
-    if (!user || role !== "admin") return;
+    if (!user || role !== "super_admin") return;
     try {
       const overview = await fetchAdminOverview();
       setData(overview);
@@ -123,7 +123,7 @@ export default function AdminPage() {
   }, [user, role]);
 
   const loadOrganisations = useCallback(async () => {
-    if (!user || role !== "admin") return;
+    if (!user || role !== "super_admin") return;
     setLoadingOrgs(true);
     try {
       const [apps, logs] = await Promise.all([
@@ -140,7 +140,7 @@ export default function AdminPage() {
   }, [user, role]);
 
   useEffect(() => {
-    if (user && role === "admin") {
+    if (user && role === "super_admin") {
       loadOrganisations();
     }
   }, [user, role, loadOrganisations]);
@@ -170,7 +170,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     let active = true;
-    if (user && role === "admin") {
+    if (user && role === "super_admin") {
       fetchAdminOverview()
         .then((overview) => {
           if (active) {
@@ -338,7 +338,7 @@ export default function AdminPage() {
 
   const selectedServiceObj = data?.services.find((s) => s.id === selectedServiceForPoster);
 
-  if (authLoading || !user || role !== "admin") {
+  if (authLoading || !user || role !== "super_admin") {
     return (
       <main className="min-h-screen bg-[#f3f6f5] flex items-center justify-center p-6 text-center">
         <div className="p-8 rounded-3xl bg-white border border-line-strong shadow-lg max-w-sm w-full">
