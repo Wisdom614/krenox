@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, useRef, use } from "react";
 import Link from "next/link";
 import QRCode from "qrcode";
 import { fetchPublicTenantQueues, PublicTenantQueuesResponse } from "@/lib/api";
@@ -18,6 +18,8 @@ export default function OrganisationPosterPage({ params }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string>("");
   const [copiedLink, setCopiedLink] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const posterRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -79,6 +81,30 @@ export default function OrganisationPosterPage({ params }: Props) {
         .join("")
         .toUpperCase()
     : "KRN";
+
+  async function handleDownload() {
+    if (!posterRef.current || !data) return;
+    setDownloading(true);
+    try {
+      // Dynamically import html2canvas so it stays out of the SSR bundle
+      const html2canvas = (await import("html2canvas")).default;
+      const canvas = await html2canvas(posterRef.current, {
+        scale: 3, // 3× for crisp A4 at ~300 dpi
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+      });
+      const link = document.createElement("a");
+      const filename = `krenox-poster-${data.organisation.slug}.png`;
+      link.download = filename;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    } catch (err) {
+      console.error("Download failed:", err);
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -145,16 +171,29 @@ export default function OrganisationPosterPage({ params }: Props) {
           </button>
 
           <button
-            onClick={() => window.print()}
-            className="px-5 py-2 rounded-xl bg-mint hover:bg-mint-dark text-forest-dark font-bold text-xs sm:text-sm shadow-md flex items-center gap-1.5 transition"
+            onClick={handleDownload}
+            disabled={downloading}
+            className="px-5 py-2 rounded-xl bg-mint hover:bg-mint-dark text-forest-dark font-bold text-xs sm:text-sm shadow-md flex items-center gap-1.5 transition disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <span>Print A4 Poster 🖨</span>
+            {downloading ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-forest-dark border-t-transparent rounded-full animate-spin" />
+                <span>Generating...</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span>Download Poster</span>
+              </>
+            )}
           </button>
         </div>
       </div>
 
-      {/* ── PRINTABLE POSTER CONTAINER (A4 standard format) ── */}
-      <div className="printable-a4-sheet max-w-2xl mx-auto bg-white rounded-3xl p-8 sm:p-14 shadow-2xl relative border border-line-strong flex flex-col items-center text-center print:shadow-none print:border-none print:p-8 print:max-w-full">
+      {/* ── PRINTABLE / DOWNLOADABLE POSTER CONTAINER (A4 standard format) ── */}
+      <div ref={posterRef} className="printable-a4-sheet max-w-2xl mx-auto bg-white rounded-3xl p-8 sm:p-14 shadow-2xl relative border border-line-strong flex flex-col items-center text-center print:shadow-none print:border-none print:p-8 print:max-w-full">
         {/* Organisation Seal Badge */}
         <div className="w-16 h-16 rounded-2xl bg-[#084d56] text-white flex items-center justify-center font-black text-2xl shadow-md mb-3 tracking-wider">
           {sealInitials}
