@@ -115,7 +115,7 @@ export default function TenantQueuePage() {
   function handleLookupTicket(e: React.FormEvent) {
     e.preventDefault();
     if (!lookupInput.trim()) return;
-    router.push(`/wait?ticketId=${encodeURIComponent(lookupInput.trim())}`);
+    router.push(`/waiting?ticketId=${encodeURIComponent(lookupInput.trim())}`);
   }
 
   // If customer has an active ticket, show the live waiting experience

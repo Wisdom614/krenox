@@ -16,6 +16,10 @@ export function getApiBase(): string {
       return `${window.location.protocol}//${host}:8000`;
     }
   }
+  // During SSR or on Vercel server environment
+  if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+    return "https://krenox-backend.onrender.com";
+  }
   return "http://127.0.0.1:8000";
 }
 

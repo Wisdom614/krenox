@@ -789,8 +789,13 @@ class OrganisationWorkflowService:
         """
         apps = self._read_apps()
         target_app = None
+        clean_target = str(slug_or_id).strip().lower()
         for app in apps.values():
-            if app.get("slug") == slug_or_id or app.get("id") == slug_or_id:
+            if (
+                str(app.get("slug", "")).lower() == clean_target
+                or str(app.get("id", "")).lower() == clean_target
+                or str(app.get("registration_ref", "")).lower() == clean_target
+            ):
                 target_app = app
                 break
 

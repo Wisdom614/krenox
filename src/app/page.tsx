@@ -51,7 +51,7 @@ export default function Home() {
   function handleTrackTicket(e: React.FormEvent) {
     e.preventDefault();
     if (!ticketSearchInput.trim()) return;
-    router.push(`/wait?ticketId=${encodeURIComponent(ticketSearchInput.trim())}`);
+    router.push(`/waiting?ticketId=${encodeURIComponent(ticketSearchInput.trim())}`);
   }
 
   function handleGoToQueue() {
@@ -175,7 +175,7 @@ export default function Home() {
                     <p className="text-xs font-black text-ink">{activeStoredTicket.ticket_number}</p>
                   </div>
                   <Link
-                    href={`/wait?ticketId=${activeStoredTicket.id}`}
+                    href={`/waiting?ticketId=${activeStoredTicket.id}`}
                     className="px-3 py-1.5 rounded-xl bg-forest text-white text-xs font-bold hover:bg-forest-dark transition"
                   >
                     View Status →
