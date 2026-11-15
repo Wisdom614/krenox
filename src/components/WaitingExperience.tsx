@@ -2,8 +2,9 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button, Logo, Modal } from "@/components/ui";
-import { MockTicket, clearTicket, getService, organisation } from "@/lib/queue";
+import { MockTicket } from "@/lib/queue";
 import { ApiQueueStatus, fetchTicketStatus, cancelTicket, postponeTicket } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 
@@ -14,6 +15,10 @@ type Props = {
 
 export default function WaitingExperience({ ticket: initialTicket, ticketId: queryTicketId }: Props) {
   const router = useRouter();
+
+  const [loading, setLoading] = useState<boolean>(Boolean(queryTicketId));
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [retryInput, setRetryInput] = useState<string>("");
 
   // Active ticket metadata
   const [ticketData, setTicketData] = useState<{
@@ -29,21 +34,23 @@ export default function WaitingExperience({ ticket: initialTicket, ticketId: que
     facility_name?: string;
     service_name?: string;
   }>({
-    ticket_number: initialTicket?.ticket || "R-040",
-    pin: initialTicket?.pin || "123456",
-    serviceId: initialTicket?.serviceId || "records",
-    customer_name: initialTicket?.name || "Customer",
+    id: initialTicket ? undefined : undefined,
+    ticket_number: initialTicket?.ticket || "",
+    pin: initialTicket?.pin || "",
+    serviceId: initialTicket?.serviceId || "",
+    customer_name: initialTicket?.name || "",
     masked_phone: initialTicket?.phone || "",
     status: "waiting",
     reminder: initialTicket?.reminder ?? true,
-    organisation_name: "University of Buea",
-    facility_name: "Student Services · Main Campus",
+    organisation_name: "",
+    facility_name: "",
+    service_name: "",
   });
 
-  const [position, setPosition] = useState<number>(initialTicket ? 3 : 1);
-  const [totalWaiting, setTotalWaiting] = useState<number>(10);
-  const [openDesks, setOpenDesks] = useState<number>(2);
-  const [estWaitMinutes, setEstWaitMinutes] = useState<number>(8);
+  const [position, setPosition] = useState<number>(1);
+  const [totalWaiting, setTotalWaiting] = useState<number>(1);
+  const [openDesks, setOpenDesks] = useState<number>(1);
+  const [estWaitMinutes, setEstWaitMinutes] = useState<number>(5);
   const [calledDeskName, setCalledDeskName] = useState<string>("Desk 1");
 
   const [copiedPin, setCopiedPin] = useState(false);
@@ -95,24 +102,36 @@ export default function WaitingExperience({ ticket: initialTicket, ticketId: que
       const statusRes: ApiQueueStatus = await fetchTicketStatus(activeTicketId);
       const t = statusRes.ticket;
       
-      setTicketData((prev) => ({
-        ...prev,
+      setTicketData({
         id: t.id,
         ticket_number: t.ticket_number,
         pin: t.pin,
+        serviceId: t.service_id,
         customer_name: t.customer_name,
-        masked_phone: t.masked_phone || prev.masked_phone,
+        masked_phone: t.masked_phone || "",
         status: t.status,
-        organisation_name: t.organisation_name || prev.organisation_name,
-        facility_name: t.facility_name || prev.facility_name,
-        service_name: t.service_name || prev.service_name,
-      }));
+        reminder: true,
+        organisation_name: t.organisation_name || "Krenox Virtual Queue",
+        facility_name: t.facility_name || "Main Counter",
+        service_name: t.service_name || "Service Counter",
+      });
 
       if (t.position) setPosition(t.position);
       setTotalWaiting(statusRes.total_waiting);
       setOpenDesks(statusRes.open_desks);
       if (t.estimated_wait_minutes) setEstWaitMinutes(t.estimated_wait_minutes);
       if (t.desk_name) setCalledDeskName(t.desk_name);
+
+      setLoading(false);
+      setFetchError(null);
+
+      try {
+        localStorage.setItem("krenox_active_ticket", JSON.stringify(t));
+      } catch {}
+
+      if (typeof window !== "undefined" && queryTicketId && queryTicketId !== t.id) {
+        window.history.replaceState(null, "", `/waiting?ticketId=${t.id}`);
+      }
 
       // Play alert if called
       if (t.status === "called" && prevStatusRef.current !== "called" && !hasPlayedChime) {
@@ -122,9 +141,11 @@ export default function WaitingExperience({ ticket: initialTicket, ticketId: que
       prevStatusRef.current = t.status;
       setIsConnected(true);
     } catch {
+      setLoading(false);
+      setFetchError("Unable to locate active ticket for this reference or PIN.");
       setIsConnected(false);
     }
-  }, [activeTicketId, playCallingChime, hasPlayedChime]);
+  }, [activeTicketId, playCallingChime, hasPlayedChime, queryTicketId]);
 
   // Realtime subscription + 3s poll fallback
   useEffect(() => {
@@ -160,7 +181,6 @@ export default function WaitingExperience({ ticket: initialTicket, ticketId: que
     };
   }, [activeTicketId, syncLiveStatus]);
 
-  const service = getService(ticketData.serviceId);
   const ahead = Math.max(position - 1, 0);
 
   // Calculate clock arrival time (e.g. "10:45 AM")
@@ -184,7 +204,9 @@ export default function WaitingExperience({ ticket: initialTicket, ticketId: que
       }
       setConfirmCancel(false);
       setTicketData((prev) => ({ ...prev, status: "cancelled" }));
-      clearTicket();
+      try {
+        localStorage.removeItem("krenox_active_ticket");
+      } catch {}
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to cancel ticket";
       setCancelError(msg);
@@ -212,6 +234,83 @@ export default function WaitingExperience({ ticket: initialTicket, ticketId: que
     } finally {
       setIsDelaying(false);
     }
+  }
+
+  if (loading && !ticketData.id) {
+    return (
+      <main className="min-h-screen bg-[#f8faf9] flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-10 h-10 rounded-full border-3 border-line border-t-forest animate-spin mb-4" />
+        <h2 className="text-base font-extrabold text-ink">Retrieving Live Virtual Pass</h2>
+        <p className="text-xs text-soft mt-1">Connecting to dispatch counter...</p>
+      </main>
+    );
+  }
+
+  if (fetchError && !ticketData.id) {
+    return (
+      <main className="min-h-screen bg-[#f8faf9] text-ink flex flex-col justify-between selection:bg-mint selection:text-forest-dark">
+        <header className="border-b border-line bg-white/90 backdrop-blur sticky top-0 z-30">
+          <div className="mx-auto flex max-w-4xl items-center justify-between px-4 sm:px-6 h-16">
+            <Logo size="md" variant="dark" />
+            <Link href="/" className="text-xs font-bold text-soft hover:text-ink transition">
+              ← Browse Venues
+            </Link>
+          </div>
+        </header>
+
+        <section className="mx-auto max-w-md w-full px-5 py-12 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 mx-auto flex items-center justify-center mb-5 border border-amber-200">
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+
+          <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800 block mb-1">
+            Ticket Not Located
+          </span>
+          <h1 className="text-2xl font-extrabold tracking-tight text-ink">
+            Check Your Code
+          </h1>
+          <p className="mt-2 text-xs sm:text-sm text-soft leading-relaxed">
+            We couldn't locate an active ticket for <span className="font-mono font-bold text-ink">{queryTicketId}</span>. Enter your 6-digit Recovery PIN, Ticket Number (e.g. R-040), or phone number below.
+          </p>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const val = retryInput.trim();
+              if (!val) return;
+              router.push(`/waiting?ticketId=${encodeURIComponent(val)}`);
+            }}
+            className="mt-6 space-y-3"
+          >
+            <input
+              type="text"
+              value={retryInput}
+              onChange={(e) => setRetryInput(e.target.value)}
+              placeholder="e.g. 151893 or R-040"
+              className="w-full h-13 px-4 rounded-2xl border border-line-strong bg-white font-mono text-center text-lg font-black text-ink focus:border-forest focus:ring-4 focus:ring-forest/15 outline-none transition uppercase tracking-wider"
+            />
+            <button
+              type="submit"
+              className="w-full py-3.5 rounded-2xl bg-forest hover:bg-forest-dark text-white font-extrabold text-xs shadow-md transition cursor-pointer"
+            >
+              Retrieve Live Virtual Ticket →
+            </button>
+          </form>
+
+          <div className="mt-8 pt-6 border-t border-line text-xs text-soft flex items-center justify-center gap-4">
+            <Link href="/" className="hover:text-ink font-semibold transition">
+              ← Return to Home
+            </Link>
+          </div>
+        </section>
+
+        <footer className="border-t border-line py-5 text-center text-xs text-soft">
+          Krenox Multi-Tenant Virtual Queue Dispatch
+        </footer>
+      </main>
+    );
   }
 
   return (
@@ -300,7 +399,7 @@ export default function WaitingExperience({ ticket: initialTicket, ticketId: que
                 </span>
                 <h2 className="text-xl font-bold text-ink">Currently at {calledDeskName}</h2>
                 <p className="text-xs text-ink-muted mt-0.5">
-                  Your request for {service.name} is being processed.
+                  Your request for {ticketData.service_name || "your counter service"} is being processed.
                 </p>
               </div>
             </div>
@@ -319,12 +418,14 @@ export default function WaitingExperience({ ticket: initialTicket, ticketId: que
             </div>
             <h2 className="font-display text-2xl font-bold text-ink">Service Concluded</h2>
             <p className="mt-2 text-sm text-ink-muted max-w-sm mx-auto leading-relaxed">
-              Your consultation at {calledDeskName} for <strong>{service.name}</strong> is complete. Thank you for choosing Krenox!
+              Your consultation at {calledDeskName} for <strong>{ticketData.service_name || "your counter service"}</strong> is complete. Thank you for choosing Krenox!
             </p>
             <div className="mt-7 flex justify-center">
               <Button
                 onClick={() => {
-                  clearTicket();
+                  try {
+                    localStorage.removeItem("krenox_active_ticket");
+                  } catch {}
                   router.push("/");
                 }}
               >
@@ -351,7 +452,9 @@ export default function WaitingExperience({ ticket: initialTicket, ticketId: que
             <div className="mt-7 flex justify-center">
               <Button
                 onClick={() => {
-                  clearTicket();
+                  try {
+                    localStorage.removeItem("krenox_active_ticket");
+                  } catch {}
                   router.push("/");
                 }}
               >
@@ -378,7 +481,9 @@ export default function WaitingExperience({ ticket: initialTicket, ticketId: que
             <div className="mt-7 flex justify-center">
               <Button
                 onClick={() => {
-                  clearTicket();
+                  try {
+                    localStorage.removeItem("krenox_active_ticket");
+                  } catch {}
                   router.push("/");
                 }}
               >
@@ -398,13 +503,13 @@ export default function WaitingExperience({ ticket: initialTicket, ticketId: que
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-mint">
-                    {ticketData.organisation_name || organisation.name}
+                    {ticketData.organisation_name || "Krenox Virtual Queue"}
                   </p>
                   <h1 className="mt-1 font-display text-2xl font-bold tracking-tight text-white">
-                    {ticketData.service_name || service.name}
+                    {ticketData.service_name || "Service Counter"}
                   </h1>
                   <p className="mt-0.5 text-xs text-white/75">
-                    {ticketData.facility_name || organisation.facility}
+                    {ticketData.facility_name || "Main Counter"}
                   </p>
                 </div>
                 <div className="text-right">

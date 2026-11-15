@@ -423,10 +423,10 @@ export default function TenantQueuePage() {
                     <input
                       type="text"
                       required
-                      placeholder="Enter Ticket ID (e.g. KRX-101 or UUID)"
+                      placeholder="Enter Recovery PIN (e.g. 151893) or Ticket (e.g. R-040)"
                       value={lookupInput}
                       onChange={(e) => setLookupInput(e.target.value)}
-                      className="flex-1 px-4 py-2.5 rounded-xl border border-line bg-surface-sunken text-xs font-medium focus:bg-white focus:outline-none focus:border-forest"
+                      className="flex-1 px-4 py-2.5 rounded-xl border border-line bg-surface-sunken text-xs font-bold font-mono uppercase focus:bg-white focus:outline-none focus:border-forest"
                     />
                     <button
                       type="submit"

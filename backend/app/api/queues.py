@@ -180,12 +180,70 @@ async def join_queue(req: JoinQueueRequest):
 
 @router.get("/ticket/{ticket_id}", response_model=QueueStatusResponse)
 def get_ticket_status(ticket_id: str):
-    """Fetch live ticket status with multi-tenant organisation and facility details."""
-    res = supabase_client.table("tickets").select("*, services(*, facilities(*, organisations(*))), service_desks(name)").eq("id", ticket_id).single().execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    """
+    Fetch live ticket status with multi-tenant organisation and facility details.
+    Supports lookup by UUID ticket ID, 6-digit Recovery PIN, ticket number (e.g. R-040), or customer phone number.
+    """
+    clean_id = ticket_id.strip()
 
-    t = res.data
+    import uuid
+    is_uuid = False
+    try:
+        uuid.UUID(clean_id)
+        is_uuid = True
+    except (ValueError, TypeError):
+        is_uuid = False
+
+    query = supabase_client.table("tickets").select(
+        "*, services(*, facilities(*, organisations(*))), service_desks(name)"
+    )
+
+    t = None
+    if is_uuid:
+        res = query.eq("id", clean_id).execute()
+        if res.data:
+            t = res.data[0]
+
+    if not t:
+        clean_phone = normalize_phone(clean_id) if any(c.isdigit() for c in clean_id) else None
+
+        # 1. Recovery PIN lookup (4-8 digits)
+        if clean_id.isdigit() and len(clean_id) in [4, 5, 6, 7, 8]:
+            res = (
+                query.eq("pin", clean_id)
+                .in_("status", ["waiting", "called", "serving"])
+                .order("joined_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                t = res.data[0]
+
+        # 2. Ticket Number lookup (e.g. R-040, T-090)
+        if not t:
+            res = (
+                query.ilike("ticket_number", clean_id)
+                .order("joined_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                t = res.data[0]
+
+        # 3. Customer Phone lookup
+        if not t and clean_phone and len(clean_phone) >= 8:
+            res = (
+                query.eq("customer_phone", clean_phone)
+                .in_("status", ["waiting", "called", "serving"])
+                .order("joined_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                t = res.data[0]
+
+    if not t:
+        raise HTTPException(status_code=404, detail="Ticket not found")
     ahead_res = (
         supabase_client.table("tickets")
         .select("id", count="exact")

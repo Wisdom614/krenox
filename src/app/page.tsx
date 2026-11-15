@@ -272,14 +272,14 @@ export default function Home() {
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. KRX-101 or Ticket UUID"
+                      placeholder="e.g. 151893, R-040, or Phone"
                       value={ticketSearchInput}
                       onChange={(e) => setTicketSearchInput(e.target.value)}
                       required
-                      className="w-full px-4 py-3 rounded-2xl border border-line bg-surface-sunken focus:bg-white focus:outline-none focus:border-forest text-xs font-bold text-ink"
+                      className="w-full px-4 py-3 rounded-2xl border border-line bg-surface-sunken focus:bg-white focus:outline-none focus:border-forest text-xs font-bold text-ink font-mono uppercase"
                     />
                     <p className="text-[11px] text-soft mt-1">
-                      Check your place in line and real-time wait estimate.
+                      Enter your 6-digit Recovery PIN, ticket number (e.g. R-040), or WhatsApp phone.
                     </p>
                   </div>
 
