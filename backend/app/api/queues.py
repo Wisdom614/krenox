@@ -1,5 +1,6 @@
 import random
 import re
+import logging
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Request, Header
 from pydantic import BaseModel
@@ -18,6 +19,8 @@ from app.models.schemas import (
 from app.services.whatsapp import whatsapp_service
 from app.services.organisations import org_workflow_service
 from app.core.ticket_security import verify_ticket_pin
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/queues", tags=["queues"])
 
@@ -124,8 +127,14 @@ async def join_queue(req: JoinQueueRequest):
             "p_pin": pin,
         }).execute()
     except Exception as error:
-        if "tickets_one_active_phone_unique" in str(error):
+        error_text = str(error)
+        logger.exception("Queue ticket allocation failed")
+        if "tickets_one_active_phone_unique" in error_text:
             raise HTTPException(status_code=400, detail="You already hold an active ticket. Complete or cancel it before taking another.")
+        if "Service is unavailable" in error_text:
+            raise HTTPException(status_code=403, detail="This service is not currently available for ticketing.")
+        if "krenox_join_queue" in error_text or "PGRST202" in error_text or "permission denied" in error_text.lower():
+            raise HTTPException(status_code=503, detail="Ticketing is being configured. Please retry shortly.")
         raise HTTPException(status_code=500, detail="Unable to issue a ticket. Please retry.") from error
     if not insert_res.data:
         raise HTTPException(status_code=500, detail="Failed to register ticket")

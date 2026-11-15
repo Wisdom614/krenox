@@ -114,3 +114,9 @@ $$;
 
 REVOKE ALL ON FUNCTION public.krenox_join_queue(UUID, TEXT, TEXT, BOOLEAN, INTEGER, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.krenox_call_next(UUID, UUID, TEXT) FROM PUBLIC;
+
+-- The FastAPI backend calls these RPCs using the Supabase service-role key.
+-- Keep the functions unavailable to browser roles while allowing that trusted
+-- server path to allocate and advance tickets.
+GRANT EXECUTE ON FUNCTION public.krenox_join_queue(UUID, TEXT, TEXT, BOOLEAN, INTEGER, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.krenox_call_next(UUID, UUID, TEXT) TO service_role;
