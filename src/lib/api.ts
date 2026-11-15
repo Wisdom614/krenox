@@ -58,6 +58,7 @@ export type ApiTicket = {
   customer_name: string;
   customer_phone?: string;
   masked_phone?: string;
+  reminder_opt_in?: boolean;
   status: string;
   joined_at: string;
   called_at?: string;

@@ -280,6 +280,7 @@ def get_ticket_status(ticket_id: str):
             pin=t["pin"],
             customer_name=t["customer_name"],
             masked_phone=mask_phone_number(t.get("customer_phone")),
+            reminder_opt_in=t.get("reminder_opt_in", False),
             status=t["status"],
             joined_at=t["joined_at"],
             position=position,

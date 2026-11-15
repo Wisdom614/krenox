@@ -16,6 +16,7 @@ class TicketResponse(BaseModel):
     pin: str
     customer_name: str
     masked_phone: Optional[str] = None
+    reminder_opt_in: bool = False
     status: str
     joined_at: datetime
     position: Optional[int] = None

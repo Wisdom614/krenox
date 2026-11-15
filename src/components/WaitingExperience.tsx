@@ -1,817 +1,113 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Button, Logo, Modal } from "@/components/ui";
-import { MockTicket } from "@/lib/queue";
-import { ApiQueueStatus, fetchTicketStatus, cancelTicket, postponeTicket } from "@/lib/api";
+import { cancelTicket, fetchTicketStatus, postponeTicket, type ApiQueueStatus } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
+import { Logo } from "@/components/ui";
 
-type Props = {
-  ticket?: MockTicket;
-  ticketId?: string;
+const finishedStates = ["completed", "cancelled", "absent", "skipped"];
+
+function stateCopy(status: string, ahead: number) {
+  if (status === "called") return { label: "Your turn now", title: "Proceed to your desk", body: "The counter is ready. Please head there now and show your ticket.", tone: "called" };
+  if (status === "serving") return { label: "Service in progress", title: "You are being served", body: "Your request is currently being handled at the desk.", tone: "serving" };
+  if (status === "skipped" || status === "absent") return { label: "Call window missed", title: "Your ticket was skipped", body: "Please speak to staff if you are still at the facility.", tone: "skipped" };
+  if (status === "completed") return { label: "Service completed", title: "All set", body: "Your ticket has been completed. Thank you for using Krenox.", tone: "complete" };
+  if (status === "cancelled") return { label: "Ticket cancelled", title: "Your place is released", body: "This ticket is no longer active.", tone: "cancelled" };
+  if (ahead <= 2) return { label: "Get ready", title: "Your turn is approaching", body: `Only ${ahead || "no"} ${ahead === 1 ? "person is" : "people are"} ahead. Start making your way to the service area.`, tone: "near" };
+  return { label: "You can wait remotely", title: "You are safely in the queue", body: "We will keep this page updated and alert you before your turn.", tone: "waiting" };
+}
+
+const toneClasses: Record<string, string> = {
+  waiting: "border-amber-300 bg-amber-50 text-amber-950",
+  near: "border-amber-400 bg-amber-100 text-amber-950",
+  called: "border-mint bg-forest text-white shadow-summons",
+  serving: "border-sky-300 bg-sky-50 text-sky-950",
+  skipped: "border-rose-300 bg-rose-50 text-rose-950",
+  complete: "border-emerald-300 bg-emerald-50 text-emerald-950",
+  cancelled: "border-slate-300 bg-slate-50 text-slate-950",
 };
 
-export default function WaitingExperience({ ticket: initialTicket, ticketId: queryTicketId }: Props) {
-  const router = useRouter();
+export default function WaitingExperience({ ticketId }: { ticketId?: string }) {
+  const [loading, setLoading] = useState(Boolean(ticketId));
+  const [error, setError] = useState("");
+  const [queue, setQueue] = useState<ApiQueueStatus | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const previousStatus = useRef<string | undefined>(undefined);
+  const [generatedAt] = useState(() => Date.now());
 
-  const [loading, setLoading] = useState<boolean>(Boolean(queryTicketId));
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const [retryInput, setRetryInput] = useState<string>("");
-
-  // Active ticket metadata
-  const [ticketData, setTicketData] = useState<{
-    id?: string;
-    ticket_number: string;
-    pin: string;
-    serviceId: string;
-    customer_name: string;
-    masked_phone?: string;
-    status: string;
-    reminder: boolean;
-    organisation_name?: string;
-    facility_name?: string;
-    service_name?: string;
-  }>({
-    id: initialTicket ? undefined : undefined,
-    ticket_number: initialTicket?.ticket || "",
-    pin: initialTicket?.pin || "",
-    serviceId: initialTicket?.serviceId || "",
-    customer_name: initialTicket?.name || "",
-    masked_phone: initialTicket?.phone || "",
-    status: "waiting",
-    reminder: initialTicket?.reminder ?? true,
-    organisation_name: "",
-    facility_name: "",
-    service_name: "",
-  });
-
-  const [position, setPosition] = useState<number>(1);
-  const [totalWaiting, setTotalWaiting] = useState<number>(1);
-  const [openDesks, setOpenDesks] = useState<number>(1);
-  const [estWaitMinutes, setEstWaitMinutes] = useState<number>(5);
-  const [calledDeskName, setCalledDeskName] = useState<string>("Desk 1");
-
-  const [copiedPin, setCopiedPin] = useState(false);
-  const [confirmCancel, setConfirmCancel] = useState(false);
-  const [isCancelling, setIsCancelling] = useState(false);
-  const [cancelError, setCancelError] = useState("");
-
-  const [confirmDelay, setConfirmDelay] = useState(false);
-  const [delayPositions, setDelayPositions] = useState<number>(3);
-  const [isDelaying, setIsDelaying] = useState(false);
-  const [delaySuccess, setDelaySuccess] = useState("");
-  const [delayError, setDelayError] = useState("");
-
-  const [hasPlayedChime, setHasPlayedChime] = useState(false);
-  const [isConnected, setIsConnected] = useState(true);
-
-  const prevStatusRef = useRef<string>("waiting");
-  const activeTicketId = queryTicketId || ticketData.id;
-
-  // Synthesized harmonic chime when called
-  const playCallingChime = useCallback(() => {
+  const sync = useCallback(async () => {
+    if (!ticketId) return;
     try {
-      const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
-      osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.18); // A5
-      gain.gain.setValueAtTime(0.35, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.85);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.9);
-
-      // Attempt gentle haptic vibration if supported
-      if (typeof window !== "undefined" && "vibrate" in navigator) {
-        navigator.vibrate([200, 100, 200]);
-      }
-    } catch {
-      // Audio context policy catch
-    }
-  }, []);
-
-  // Poll server for exact position calculations
-  const syncLiveStatus = useCallback(async () => {
-    if (!activeTicketId) return;
-    try {
-      const statusRes: ApiQueueStatus = await fetchTicketStatus(activeTicketId);
-      const t = statusRes.ticket;
-      
-      setTicketData({
-        id: t.id,
-        ticket_number: t.ticket_number,
-        pin: t.pin,
-        serviceId: t.service_id,
-        customer_name: t.customer_name,
-        masked_phone: t.masked_phone || "",
-        status: t.status,
-        reminder: true,
-        organisation_name: t.organisation_name || "Krenox Virtual Queue",
-        facility_name: t.facility_name || "Main Counter",
-        service_name: t.service_name || "Service Counter",
-      });
-
-      if (t.position) setPosition(t.position);
-      setTotalWaiting(statusRes.total_waiting);
-      setOpenDesks(statusRes.open_desks);
-      if (t.estimated_wait_minutes) setEstWaitMinutes(t.estimated_wait_minutes);
-      if (t.desk_name) setCalledDeskName(t.desk_name);
-
+      const result = await fetchTicketStatus(ticketId);
+      setQueue(result);
+      setError("");
       setLoading(false);
-      setFetchError(null);
-
-      try {
-        localStorage.setItem("krenox_active_ticket", JSON.stringify(t));
-      } catch {}
-
-      if (typeof window !== "undefined" && queryTicketId && queryTicketId !== t.id) {
-        window.history.replaceState(null, "", `/waiting?ticketId=${t.id}`);
-      }
-
-      // Play alert if called
-      if (t.status === "called" && prevStatusRef.current !== "called" && !hasPlayedChime) {
-        playCallingChime();
-        setHasPlayedChime(true);
-      }
-      prevStatusRef.current = t.status;
       setIsConnected(true);
-    } catch {
+      localStorage.setItem("krenox_active_ticket", JSON.stringify(result.ticket));
+      if (result.ticket.status === "called" && previousStatus.current && previousStatus.current !== "called") navigator.vibrate?.([160, 80, 160]);
+      previousStatus.current = result.ticket.status;
+    } catch (cause) {
       setLoading(false);
-      setFetchError("Unable to locate active ticket for this reference or PIN.");
       setIsConnected(false);
+      setError(cause instanceof Error ? cause.message : "We could not refresh this ticket.");
     }
-  }, [activeTicketId, playCallingChime, hasPlayedChime, queryTicketId]);
+  }, [ticketId]);
 
-  // Realtime subscription + 3s poll fallback
   useEffect(() => {
-    syncLiveStatus();
-    const pollInterval = setInterval(() => {
-      syncLiveStatus();
-    }, 3000);
+    const initialSync = window.setTimeout(() => void sync(), 0);
+    const poll = window.setInterval(() => void sync(), 8000);
+    const channel = supabase.channel(`ticket-${ticketId}`).on("postgres_changes", { event: "UPDATE", schema: "public", table: "tickets" }, () => void sync()).subscribe((status) => setIsConnected(status === "SUBSCRIBED"));
+    return () => { window.clearTimeout(initialSync); window.clearInterval(poll); void supabase.removeChannel(channel); };
+  }, [sync, ticketId]);
 
-    const channel = supabase
-      .channel("tickets-realtime-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "tickets",
-        },
-        (payload) => {
-          if (activeTicketId && payload.new && payload.new.id === activeTicketId) {
-            syncLiveStatus();
-          } else {
-            syncLiveStatus();
-          }
-        }
-      )
-      .subscribe((status) => {
-        setIsConnected(status === "SUBSCRIBED");
-      });
-
-    return () => {
-      clearInterval(pollInterval);
-      supabase.removeChannel(channel);
-    };
-  }, [activeTicketId, syncLiveStatus]);
-
-  const ahead = Math.max(position - 1, 0);
-
-  // Calculate clock arrival time (e.g. "10:45 AM")
-  const arrivalTimeFormatted = (() => {
-    const d = new Date(Date.now() + estWaitMinutes * 60 * 1000);
-    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  })();
-
-  function copyPin() {
-    navigator.clipboard?.writeText(ticketData.pin);
-    setCopiedPin(true);
-    setTimeout(() => setCopiedPin(false), 2000);
+  async function copyPin() {
+    if (!queue) return;
+    await navigator.clipboard?.writeText(queue.ticket.pin);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
   }
 
-  async function handleCancelTicket() {
-    setIsCancelling(true);
-    setCancelError("");
-    try {
-      if (activeTicketId) {
-        await cancelTicket(activeTicketId, ticketData.pin);
-      }
-      setConfirmCancel(false);
-      setTicketData((prev) => ({ ...prev, status: "cancelled" }));
-      try {
-        localStorage.removeItem("krenox_active_ticket");
-      } catch {}
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to cancel ticket";
-      setCancelError(msg);
-    } finally {
-      setIsCancelling(false);
-    }
+  async function leaveQueue() {
+    if (!queue || !ticketId || !window.confirm("Leave the queue? Your place will be released.")) return;
+    setBusy(true);
+    try { await cancelTicket(ticketId, queue.ticket.pin); await sync(); } finally { setBusy(false); }
   }
 
-  async function handlePostponeTicket() {
-    if (!activeTicketId) return;
-    setIsDelaying(true);
-    setDelayError("");
-    setDelaySuccess("");
-    try {
-      const res = await postponeTicket(activeTicketId, delayPositions, ticketData.pin);
-      setDelaySuccess(res.message);
-      await syncLiveStatus();
-      setTimeout(() => {
-        setConfirmDelay(false);
-        setDelaySuccess("");
-      }, 1600);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to delay position";
-      setDelayError(msg);
-    } finally {
-      setIsDelaying(false);
-    }
+  async function delayQueue() {
+    if (!queue || !ticketId || !window.confirm("Let three people pass you?")) return;
+    setBusy(true);
+    try { await postponeTicket(ticketId, 3, queue.ticket.pin); await sync(); } finally { setBusy(false); }
   }
 
-  if (loading && !ticketData.id) {
-    return (
-      <main className="min-h-screen bg-[#f8faf9] flex flex-col items-center justify-center p-6 text-center">
-        <div className="w-10 h-10 rounded-full border-3 border-line border-t-forest animate-spin mb-4" />
-        <h2 className="text-base font-extrabold text-ink">Retrieving Live Virtual Pass</h2>
-        <p className="text-xs text-soft mt-1">Connecting to dispatch counter...</p>
-      </main>
-    );
-  }
+  if (loading) return <main className="grid min-h-screen place-items-center bg-canvas p-6 text-center"><p role="status" className="font-semibold text-ink-muted">Loading your live ticket...</p></main>;
+  if (!queue) return <main className="grid min-h-screen place-items-center bg-canvas p-6 text-center"><div><h1 className="text-2xl font-bold text-ink">Ticket unavailable</h1><p className="mt-2 text-ink-muted">{error || "This ticket could not be found."}</p><Link className="mt-5 inline-block font-semibold text-forest underline" href="/waiting">Recover a ticket</Link></div></main>;
 
-  if (fetchError && !ticketData.id) {
-    return (
-      <main className="min-h-screen bg-[#f8faf9] text-ink flex flex-col justify-between selection:bg-mint selection:text-forest-dark">
-        <header className="border-b border-line bg-white/90 backdrop-blur sticky top-0 z-30">
-          <div className="mx-auto flex max-w-4xl items-center justify-between px-4 sm:px-6 h-16">
-            <Logo size="md" variant="dark" />
-            <Link href="/" className="text-xs font-bold text-soft hover:text-ink transition">
-              ← Browse Venues
-            </Link>
-          </div>
-        </header>
-
-        <section className="mx-auto max-w-md w-full px-5 py-12 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 mx-auto flex items-center justify-center mb-5 border border-amber-200">
-            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          </div>
-
-          <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800 block mb-1">
-            Ticket Not Located
-          </span>
-          <h1 className="text-2xl font-extrabold tracking-tight text-ink">
-            Check Your Code
-          </h1>
-          <p className="mt-2 text-xs sm:text-sm text-soft leading-relaxed">
-            We couldn't locate an active ticket for <span className="font-mono font-bold text-ink">{queryTicketId}</span>. Enter your 6-digit Recovery PIN, Ticket Number (e.g. R-040), or phone number below.
-          </p>
-
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const val = retryInput.trim();
-              if (!val) return;
-              router.push(`/waiting?ticketId=${encodeURIComponent(val)}`);
-            }}
-            className="mt-6 space-y-3"
-          >
-            <input
-              type="text"
-              value={retryInput}
-              onChange={(e) => setRetryInput(e.target.value)}
-              placeholder="e.g. 151893 or R-040"
-              className="w-full h-13 px-4 rounded-2xl border border-line-strong bg-white font-mono text-center text-lg font-black text-ink focus:border-forest focus:ring-4 focus:ring-forest/15 outline-none transition uppercase tracking-wider"
-            />
-            <button
-              type="submit"
-              className="w-full py-3.5 rounded-2xl bg-forest hover:bg-forest-dark text-white font-extrabold text-xs shadow-md transition cursor-pointer"
-            >
-              Retrieve Live Virtual Ticket →
-            </button>
-          </form>
-
-          <div className="mt-8 pt-6 border-t border-line text-xs text-soft flex items-center justify-center gap-4">
-            <Link href="/" className="hover:text-ink font-semibold transition">
-              ← Return to Home
-            </Link>
-          </div>
-        </section>
-
-        <footer className="border-t border-line py-5 text-center text-xs text-soft">
-          Krenox Multi-Tenant Virtual Queue Dispatch
-        </footer>
-      </main>
-    );
-  }
+  const ticket = queue.ticket;
+  const ahead = Math.max(queue.customers_ahead, 0);
+  const state = stateCopy(ticket.status, ahead);
+  const isFinished = finishedStates.includes(ticket.status);
+  const isCalled = ticket.status === "called";
+  const expected = new Date(generatedAt + (ticket.estimated_wait_minutes || 0) * 60_000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
   return (
-    <main className="min-h-screen bg-canvas text-ink pb-24 selection:bg-mint selection:text-forest-dark">
-      {/* ── Top Navigation Bar ── */}
-      <header className="sticky top-0 z-30 border-b border-line bg-canvas/90 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-5 py-4 sm:px-8">
-          <Logo />
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-soft flex items-center gap-1.5 font-medium">
-              <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? "bg-ok animate-pulse" : "bg-line-strong"}`} />
-              <span>{isConnected ? "Live" : "Offline"}</span>
-            </span>
-            <button
-              onClick={() => router.push("/")}
-              className="rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink-muted hover:text-ink hover:border-forest/40 transition"
-            >
-              Exit
-            </button>
-          </div>
-        </div>
-      </header>
+    <main className="min-h-screen bg-canvas pb-12 text-ink">
+      <header className="border-b border-line bg-canvas/95 backdrop-blur"><div className="mx-auto flex max-w-xl items-center justify-between px-5 py-4"><Logo /><span className="inline-flex items-center gap-2 text-xs font-semibold text-ink-muted"><span className={`h-2 w-2 rounded-full ${isConnected ? "bg-emerald-600" : "bg-slate-400"}`} />{isConnected ? "Live updates" : "Reconnecting"}</span></div></header>
+      <div className="mx-auto max-w-xl px-5 pt-6 sm:pt-8">
+        <p role="status" aria-atomic="true" className="sr-only">{state.title}. {ahead} people ahead. Estimated wait {ticket.estimated_wait_minutes || 0} minutes.</p>
+        <section className={`rounded-3xl border p-6 sm:p-8 ${toneClasses[state.tone]}`} aria-labelledby="queue-state-title" role={isCalled ? "alert" : undefined}>
+          <div className="flex items-start justify-between gap-4"><div><p className={`text-xs font-extrabold uppercase tracking-[0.16em] ${isCalled ? "text-mint" : "opacity-75"}`}>{state.label}</p><h1 id="queue-state-title" className="mt-2 font-display text-3xl font-bold tracking-tight">{isCalled ? `Go to ${ticket.desk_name || "your desk"}` : state.title}</h1><p className={`mt-3 max-w-md text-sm leading-6 ${isCalled ? "text-white/85" : "opacity-85"}`}>{state.body}</p></div><span aria-hidden className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white/20 text-xl">{isCalled ? "!" : state.tone === "skipped" ? "×" : "•"}</span></div>
+        </section>
 
-      <div className="mx-auto max-w-xl px-5 pt-8 sm:px-8">
-        {/* ─────────────────────────────────────────────────────────────
-            STATE 1: NOW CALLING (HIGH VELOCITY TAKEOVER)
-        ───────────────────────────────────────────────────────────── */}
-        {ticketData.status === "called" && (
-          <div
-            role="alert"
-            className="summons-glow mb-8 overflow-hidden rounded-[2.5rem] bg-forest text-white p-7 sm:p-9 border-2 border-mint shadow-summons"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <span className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-mint">
-                  <span className="h-2 w-2 rounded-full bg-mint animate-ping" />
-                  Your Turn Now
-                </span>
-                <h1 className="mt-3 font-display text-3xl font-extrabold tracking-tight sm:text-4xl text-white">
-                  Proceed to {calledDeskName}
-                </h1>
-                <p className="mt-2 text-sm text-white/90 leading-relaxed">
-                  The counter clerk is ready for Ticket{" "}
-                  <span className="font-mono font-bold text-mint text-base">
-                    {ticketData.ticket_number}
-                  </span>{" "}
-                  ({ticketData.customer_name}). Please show this screen at the desk.
-                </p>
-              </div>
-            </div>
+        {!isFinished && <section className="mt-4 rounded-3xl border border-line bg-surface p-6 shadow-card" aria-labelledby="ticket-summary-title"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-wider text-ink-subtle">{ticket.organisation_name || "Krenox"}</p><h2 id="ticket-summary-title" className="mt-1 text-xl font-bold">{ticket.service_name || "Service queue"}</h2><p className="mt-1 text-sm text-ink-muted">{ticket.facility_name || "Service facility"}</p></div><div className="text-right"><p className="text-[11px] font-bold uppercase tracking-wider text-ink-subtle">Your ticket</p><p className="font-mono text-2xl font-black text-forest">{ticket.ticket_number}</p></div></div><div className="mt-6 grid grid-cols-2 gap-3"><div className="rounded-2xl bg-amber-50 p-4"><p className="text-xs font-bold uppercase tracking-wider text-amber-800">Position</p><p className="mt-1 font-mono text-4xl font-black text-amber-950">#{isCalled ? 1 : ticket.position || 1}</p><p className="mt-1 text-xs text-amber-900">{ahead ? `${ahead} ${ahead === 1 ? "person" : "people"} ahead` : "You are next"}</p></div><div className={`rounded-2xl p-4 ${isCalled ? "bg-forest text-white" : "bg-mint-soft text-forest"}`}><p className="text-xs font-bold uppercase tracking-wider opacity-70">{isCalled ? "Desk" : "Expected service"}</p><p className="mt-1 font-mono text-2xl font-black">{isCalled ? ticket.desk_name || "Now" : expected}</p><p className="mt-2 text-xs opacity-80">{isCalled ? "Counter ready" : `About ${ticket.estimated_wait_minutes || 0} min remaining`}</p></div></div><div className="mt-5 h-2 overflow-hidden rounded-full bg-surface-sunken"><div className="h-full rounded-full bg-forest transition-all duration-500" style={{ width: `${Math.min(100, Math.max(8, 100 - ahead * 10))}%` }} /></div><p className="mt-2 text-xs text-ink-muted">{ahead <= 2 ? "Stay nearby - your turn is close." : "You do not need to wait at the counter yet."}</p></section>}
 
-            <div className="mt-6 rounded-2xl bg-forest-dark/70 border border-white/15 p-4 flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-white/70">
-                  Verification Code
-                </p>
-                <p className="mt-0.5 font-mono text-2xl font-bold tracking-widest text-mint">
-                  {ticketData.pin}
-                </p>
-              </div>
-              <button
-                onClick={copyPin}
-                type="button"
-                className="rounded-xl bg-white/10 px-3.5 py-2 text-xs font-bold text-white hover:bg-white/20 transition"
-              >
-                {copiedPin ? "Copied! ✓" : "Copy Code"}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ─────────────────────────────────────────────────────────────
-            STATE 2: SERVING AT DESK
-        ───────────────────────────────────────────────────────────── */}
-        {ticketData.status === "serving" && (
-          <div className="mb-8 rounded-[2rem] bg-status-serving-bg border border-status-serving/30 p-6 sm:p-8 text-ink shadow-sm">
-            <div className="flex items-center gap-4">
-              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#0369a1] text-white shadow-sm">
-                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-              </div>
-              <div>
-                <span className="text-xs font-bold uppercase tracking-wider text-[#0369a1]">
-                  Consultation in Progress
-                </span>
-                <h2 className="text-xl font-bold text-ink">Currently at {calledDeskName}</h2>
-                <p className="text-xs text-ink-muted mt-0.5">
-                  Your request for {ticketData.service_name || "your counter service"} is being processed.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ─────────────────────────────────────────────────────────────
-            STATE 3: COMPLETED RECEIPT
-        ───────────────────────────────────────────────────────────── */}
-        {ticketData.status === "completed" && (
-          <div className="ticket-pop mb-8 rounded-[2.5rem] bg-surface p-8 sm:p-10 text-center shadow-elevated border border-line">
-            <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-surface-sunken text-forest mb-4 border border-line">
-              <svg className="w-6 h-6 text-forest" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-            <h2 className="font-display text-2xl font-bold text-ink">Service Concluded</h2>
-            <p className="mt-2 text-sm text-ink-muted max-w-sm mx-auto leading-relaxed">
-              Your consultation at {calledDeskName} for <strong>{ticketData.service_name || "your counter service"}</strong> is complete. Thank you for choosing Krenox!
-            </p>
-            <div className="mt-7 flex justify-center">
-              <Button
-                onClick={() => {
-                  try {
-                    localStorage.removeItem("krenox_active_ticket");
-                  } catch {}
-                  router.push("/");
-                }}
-              >
-                Return to Home →
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* ─────────────────────────────────────────────────────────────
-            STATE 4: CANCELLED RECEIPT
-        ───────────────────────────────────────────────────────────── */}
-        {ticketData.status === "cancelled" && (
-          <div className="ticket-pop mb-8 rounded-[2.5rem] bg-surface p-8 sm:p-10 text-center shadow-elevated border border-line">
-            <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-surface-sunken text-status-danger mb-4 border border-line">
-              <svg className="w-6 h-6 text-status-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </div>
-            <h2 className="font-display text-2xl font-bold text-ink">Ticket Cancelled</h2>
-            <p className="mt-2 text-sm text-ink-muted max-w-sm mx-auto leading-relaxed">
-              Ticket <span className="font-mono font-bold text-ink">{ticketData.ticket_number}</span> has been cancelled and your spot has been released.
-            </p>
-            <div className="mt-7 flex justify-center">
-              <Button
-                onClick={() => {
-                  try {
-                    localStorage.removeItem("krenox_active_ticket");
-                  } catch {}
-                  router.push("/");
-                }}
-              >
-                Return to Home →
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* ─────────────────────────────────────────────────────────────
-            STATE 5: ABSENT OR SKIPPED
-        ───────────────────────────────────────────────────────────── */}
-        {(ticketData.status === "absent" || ticketData.status === "skipped") && (
-          <div className="ticket-pop mb-8 rounded-[2.5rem] bg-surface p-8 sm:p-10 text-center shadow-elevated border border-line">
-            <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-surface-sunken text-ink-muted mb-4 border border-line">
-              <svg className="w-6 h-6 text-ink-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h2 className="font-display text-2xl font-bold text-ink">Call Window Expired</h2>
-            <p className="mt-2 text-sm text-ink-muted max-w-sm mx-auto leading-relaxed">
-              Ticket <span className="font-mono font-bold text-ink">{ticketData.ticket_number}</span> was called at {calledDeskName}, but was marked absent. If you are physically present, please speak with desk staff to recall your turn.
-            </p>
-            <div className="mt-7 flex justify-center">
-              <Button
-                onClick={() => {
-                  try {
-                    localStorage.removeItem("krenox_active_ticket");
-                  } catch {}
-                  router.push("/");
-                }}
-              >
-                Return to Home →
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* ─────────────────────────────────────────────────────────────
-            CORE ARTIFACT: DIGITAL BOARDING PASS TICKET
-        ───────────────────────────────────────────────────────────── */}
-        {ticketData.status !== "completed" && ticketData.status !== "cancelled" && ticketData.status !== "absent" && ticketData.status !== "skipped" && (
-          <div className="relative overflow-hidden rounded-[2.5rem] bg-surface border border-line shadow-elevated">
-            {/* Ticket Header */}
-            <div className="bg-forest px-6 py-6 sm:px-8 text-white relative">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-mint">
-                    {ticketData.organisation_name || "Krenox Virtual Queue"}
-                  </p>
-                  <h1 className="mt-1 font-display text-2xl font-bold tracking-tight text-white">
-                    {ticketData.service_name || "Service Counter"}
-                  </h1>
-                  <p className="mt-0.5 text-xs text-white/75">
-                    {ticketData.facility_name || "Main Counter"}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-white/60">
-                    Ticket Number
-                  </p>
-                  <p className="font-mono text-2xl font-black tracking-wide text-white">
-                    {ticketData.ticket_number}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Perforated Divider Tear Line with Circular Notches */}
-            <div className="relative flex items-center bg-surface py-3 px-6 sm:px-8 border-b border-dashed border-line">
-              <div
-                aria-hidden
-                className="absolute -left-3.5 h-7 w-7 rounded-full bg-canvas border border-line"
-              />
-              <div
-                aria-hidden
-                className="absolute -right-3.5 h-7 w-7 rounded-full bg-canvas border border-line"
-              />
-              <div className="flex-1 flex justify-between text-[11px] font-semibold text-ink-subtle uppercase tracking-wider">
-                <span>Digital Virtual Pass</span>
-                <span>Active Queue</span>
-              </div>
-            </div>
-
-            {/* Ticket Live Position Body */}
-            <div className="p-6 sm:p-8">
-              {/* Position Highlight Hero */}
-              <div className="rounded-3xl bg-surface-sunken p-6 border border-line">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold uppercase tracking-wider text-ink-muted">
-                    Your Live Position
-                  </p>
-                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-muted">
-                    <span className="h-1.5 w-1.5 rounded-full bg-forest animate-pulse" />
-                    <strong className="font-semibold text-ink">{totalWaiting}</strong> in queue
-                  </span>
-                </div>
-
-                <div className="mt-4 flex items-baseline gap-3">
-                  <span className="font-mono text-6xl sm:text-7xl font-extrabold tracking-tight text-forest tabular-nums">
-                    #{ticketData.status === "called" ? "1" : position}
-                  </span>
-                  <span className="text-sm font-medium text-ink-muted">
-                    {ticketData.status === "called" ? (
-                      <strong className="text-status-called">Now Summoned</strong>
-                    ) : ahead === 0 ? (
-                      <strong className="text-status-called">You are next!</strong>
-                    ) : (
-                      <>
-                        <strong className="text-ink">{ahead}</strong> {ahead === 1 ? "person" : "people"} ahead of you
-                      </>
-                    )}
-                  </span>
-                </div>
-
-                {/* 4-Stage Stepping Timeline */}
-                <div className="mt-6 pt-5 border-t border-line/80">
-                  <div className="flex items-center justify-between text-xs font-bold">
-                    <span className="text-forest">Journey Status</span>
-                    <span className="font-mono text-forest">
-                      {position <= 1 ? "Counter Desk" : position <= 3 ? "Approaching Turn" : "In Line"}
-                    </span>
-                  </div>
-                  <div className="mt-3 grid grid-cols-4 gap-2">
-                    {[
-                      { label: "Joined", done: true },
-                      { label: "In Line", done: position <= totalWaiting },
-                      { label: "Approaching", done: position <= 3 },
-                      { label: "At Desk", done: ticketData.status === "called" || ticketData.status === "serving" },
-                    ].map((step, idx) => (
-                      <div key={idx} className="flex flex-col gap-1.5">
-                        <div
-                          className={`h-2 rounded-full transition-colors duration-500 ${
-                            step.done ? "bg-forest" : "bg-line"
-                          }`}
-                        />
-                        <span className={`text-[10px] font-semibold text-center ${step.done ? "text-forest" : "text-ink-subtle"}`}>
-                          {step.label}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Real-world Time Estimation Card */}
-              <div className="mt-4 grid grid-cols-2 gap-3.5">
-                <div className="rounded-2xl border border-line bg-surface p-4 shadow-subtle">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-ink-subtle">
-                    Expected Service
-                  </p>
-                  <p className="mt-1 font-mono text-xl sm:text-2xl font-bold text-ink tabular-nums">
-                    {ticketData.status === "called" ? "Right Now" : arrivalTimeFormatted}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-ink-muted">
-                    {ticketData.status === "called" ? "Counter ready" : `~${estWaitMinutes} mins remaining`}
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-line bg-surface p-4 shadow-subtle">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-ink-subtle">
-                    Active Counters
-                  </p>
-                  <p className="mt-1 font-mono text-xl sm:text-2xl font-bold text-forest tabular-nums">
-                    {openDesks} {openDesks === 1 ? "Desk" : "Desks"}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-ink-muted">
-                    Serving tickets live
-                  </p>
-                </div>
-              </div>
-
-              {/* Security & Recovery Pass Details */}
-              <div className="mt-6 rounded-2xl bg-surface-sunken border border-line p-4.5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-bold text-forest uppercase tracking-wider">
-                      Ticket Recovery PIN
-                    </p>
-                    <p className="mt-0.5 font-mono text-2xl font-bold tracking-widest text-ink tabular-nums">
-                      {ticketData.pin}
-                    </p>
-                  </div>
-                  <button
-                    onClick={copyPin}
-                    type="button"
-                    className="rounded-xl border border-line bg-surface px-3.5 py-2 text-xs font-bold text-forest hover:bg-surface-hover shadow-sm transition active:scale-95"
-                  >
-                    {copiedPin ? "Copied! ✓" : "Copy PIN"}
-                  </button>
-                </div>
-
-                {/* WhatsApp Status Indicator */}
-                <div className="mt-3 pt-3 border-t border-line/80 flex items-center justify-between text-xs">
-                  <span className="text-ink-muted flex items-center gap-1.5">
-                    <span className="text-status-called font-bold">●</span>
-                    {ticketData.reminder ? "WhatsApp Alerts Active" : "In-Browser Tracking"}
-                  </span>
-                  <span className="font-mono text-ink font-semibold">
-                    {ticketData.masked_phone || "Protected"}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Customer Control Actions ── */}
-        {ticketData.status !== "completed" && ticketData.status !== "cancelled" && ticketData.status !== "absent" && ticketData.status !== "skipped" && (
-          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4 text-center">
-            {ticketData.status === "waiting" && position > 1 && (
-              <button
-                type="button"
-                onClick={() => setConfirmDelay(true)}
-                className="text-xs font-semibold text-ink-muted hover:text-ink hover:underline transition underline-offset-4 flex items-center gap-1.5"
-              >
-                <svg className="w-3.5 h-3.5 text-ink-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Running late? Delay spot
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                setCancelError("");
-                setConfirmCancel(true);
-              }}
-              className="text-xs font-semibold text-status-danger hover:underline transition underline-offset-4"
-            >
-              Cancel ticket / Leave queue
-            </button>
-          </div>
-        )}
+        {!isFinished && <section className="mt-4 rounded-2xl border border-line bg-surface p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-sm font-bold">{ticket.reminder_opt_in ? "WhatsApp alerts are on" : "Browser tracking is on"}</p><p className="mt-0.5 text-xs text-ink-muted">{ticket.reminder_opt_in ? `${ticket.masked_phone || "Your number"} will receive your queue alerts.` : "Keep this page open for live updates."}</p></div><span aria-hidden className={`h-3 w-3 rounded-full ${ticket.reminder_opt_in ? "bg-emerald-600" : "bg-slate-400"}`} /></div></section>}
+        {!isFinished && <div className="mt-5 flex flex-wrap gap-3"><button type="button" onClick={delayQueue} disabled={busy || isCalled} className="min-h-11 rounded-xl border border-line px-4 text-sm font-bold text-ink-muted disabled:opacity-40">Need more time?</button><button type="button" onClick={leaveQueue} disabled={busy} className="min-h-11 rounded-xl px-4 text-sm font-bold text-status-danger hover:bg-status-danger-bg disabled:opacity-40">Leave queue</button></div>}
+        <section className="mt-7 border-t border-line pt-5"><button type="button" onClick={() => setDetailsOpen((open) => !open)} className="flex w-full items-center justify-between text-left text-sm font-bold text-forest" aria-expanded={detailsOpen}>Ticket details <span aria-hidden>{detailsOpen ? "−" : "+"}</span></button>{detailsOpen && <div className="mt-4 rounded-2xl bg-surface-sunken p-4"><div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-wider text-ink-subtle">Recovery PIN</p><p className="mt-1 font-mono text-2xl font-bold tracking-widest">{ticket.pin}</p></div><button type="button" onClick={copyPin} className="min-h-11 rounded-xl border border-line bg-surface px-4 text-sm font-bold text-forest">{copied ? "Copied" : "Copy PIN"}</button></div></div>}</section>
       </div>
-
-      {/* ── Cancel Confirmation Modal ── */}
-      {confirmCancel && (
-        <Modal titleId="cancel-modal-title" onClose={() => !isCancelling && setConfirmCancel(false)} size="md">
-          <div className="p-7 text-center">
-            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-status-danger-bg text-status-danger mb-4 border border-status-danger/20">
-              <svg className="w-6 h-6 text-status-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </div>
-            <h3 id="cancel-modal-title" className="font-display text-xl font-bold text-ink">
-              Leave this queue?
-            </h3>
-            <p className="mt-2 text-sm text-ink-muted leading-relaxed">
-              If you leave now, you will forfeit Ticket{" "}
-              <span className="font-mono font-bold text-ink">{ticketData.ticket_number}</span> and
-              your position #{position}.
-            </p>
-
-            {cancelError && (
-              <div className="mt-3 p-3 rounded-xl bg-status-danger-bg text-status-danger text-xs font-medium">
-                {cancelError}
-              </div>
-            )}
-
-            <div className="mt-6 flex flex-col sm:flex-row gap-3">
-              <Button
-                variant="secondary"
-                className="flex-1"
-                disabled={isCancelling}
-                onClick={() => setConfirmCancel(false)}
-              >
-                Keep My Place
-              </Button>
-              <Button
-                variant="danger"
-                className="flex-1"
-                disabled={isCancelling}
-                onClick={handleCancelTicket}
-              >
-                {isCancelling ? "Cancelling..." : "Cancel Ticket"}
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* ── Delay Turn Modal ── */}
-      {confirmDelay && (
-        <Modal titleId="delay-modal-title" onClose={() => !isDelaying && setConfirmDelay(false)} size="md">
-          <div className="p-7 text-center">
-            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-surface-sunken text-forest mb-4 border border-line">
-              <svg className="w-6 h-6 text-forest" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h3 id="delay-modal-title" className="font-display text-xl font-bold text-ink">
-              Running Late? Hold Your Spot
-            </h3>
-            <p className="mt-2 text-sm text-ink-muted leading-relaxed">
-              Need extra transit time? You can let a few people pass you without forfeiting your ticket.
-            </p>
-
-            <div className="mt-5 grid grid-cols-2 gap-3 text-left">
-              <button
-                type="button"
-                onClick={() => setDelayPositions(3)}
-                className={`p-3.5 rounded-2xl border text-sm transition ${
-                  delayPositions === 3
-                    ? "border-forest bg-forest/5 font-bold text-forest shadow-sm"
-                    : "border-line bg-surface hover:bg-surface-hover text-ink"
-                }`}
-              >
-                <div className="font-semibold">+3 Positions</div>
-                <div className="text-xs text-ink-muted mt-0.5">~6 mins extra</div>
-              </button>
-              <button
-                type="button"
-                onClick={() => setDelayPositions(5)}
-                className={`p-3.5 rounded-2xl border text-sm transition ${
-                  delayPositions === 5
-                    ? "border-forest bg-forest/5 font-bold text-forest shadow-sm"
-                    : "border-line bg-surface hover:bg-surface-hover text-ink"
-                }`}
-              >
-                <div className="font-semibold">+5 Positions</div>
-                <div className="text-xs text-ink-muted mt-0.5">~10 mins extra</div>
-              </button>
-            </div>
-
-            {delaySuccess && (
-              <div className="mt-4 p-3 rounded-xl bg-forest/10 text-forest text-xs font-semibold">
-                {delaySuccess}
-              </div>
-            )}
-
-            {delayError && (
-              <div className="mt-4 p-3 rounded-xl bg-status-danger-bg text-status-danger text-xs font-medium">
-                {delayError}
-              </div>
-            )}
-
-            <div className="mt-6 flex flex-col sm:flex-row gap-3">
-              <Button
-                variant="secondary"
-                className="flex-1"
-                disabled={isDelaying}
-                onClick={() => setConfirmDelay(false)}
-              >
-                Keep Current Spot
-              </Button>
-              <Button
-                className="flex-1"
-                disabled={isDelaying}
-                onClick={handlePostponeTicket}
-              >
-                {isDelaying ? "Updating Line..." : `Postpone by ${delayPositions} Spots`}
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
     </main>
   );
 }

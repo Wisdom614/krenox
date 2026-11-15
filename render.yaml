@@ -16,11 +16,11 @@ services:
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: WA_BASE_URL
-        value: https://akg.wisedev.online
+        sync: false
       - key: WA_API_KEY
-        value: wag_HHOZAgSD74TEXvdbutSttNKbJYDCAsMT
+        sync: false
       - key: WA_SESSION_ID
-        value: 9p9jve
+        sync: false
       - key: RESEND_API_KEY
         sync: false
       - key: RESEND_FROM_EMAIL

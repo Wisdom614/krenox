@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import WaitingExperience from "@/components/WaitingExperience";
 import { Logo } from "@/components/ui";
+import { recoverTicket } from "@/lib/api";
 
 export default function WaitingRoute() {
   const searchParams = useSearchParams();
@@ -14,28 +15,53 @@ export default function WaitingRoute() {
   const [activeId, setActiveId] = useState<string | null>(ticketIdFromUrl);
   const [mounted, setMounted] = useState(false);
   const [recoveryInput, setRecoveryInput] = useState("");
+  const [recoveryPin, setRecoveryPin] = useState("");
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [isRecovering, setIsRecovering] = useState(false);
+
+  async function recoverActiveTicket() {
+    const reference = recoveryInput.trim();
+    const pin = recoveryPin.trim();
+    if (!reference || !pin) {
+      setRecoveryError("Enter your ticket number or phone number, plus your recovery PIN.");
+      return;
+    }
+
+    setIsRecovering(true);
+    setRecoveryError(null);
+    try {
+      const recovered = await recoverTicket(reference, pin);
+      setActiveId(recovered.ticket_id);
+      router.push(recovered.redirect_url);
+    } catch (error: unknown) {
+      setRecoveryError(error instanceof Error ? error.message : "We could not recover that ticket.");
+    } finally {
+      setIsRecovering(false);
+    }
+  }
 
   useEffect(() => {
+    const scheduledUpdates: number[] = [];
     // Purge deprecated prototype key
     try {
       localStorage.removeItem("krenox-prototype-ticket");
     } catch {}
 
     if (ticketIdFromUrl) {
-      setActiveId(ticketIdFromUrl);
+      scheduledUpdates.push(window.setTimeout(() => setActiveId(ticketIdFromUrl), 0));
     } else {
       try {
         const stored = localStorage.getItem("krenox_active_ticket");
         if (stored) {
           const parsed = JSON.parse(stored);
           if (parsed?.id) {
-            setActiveId(parsed.id);
+            scheduledUpdates.push(window.setTimeout(() => setActiveId(parsed.id), 0));
           }
         }
       } catch {}
     }
-    setMounted(true);
+    scheduledUpdates.push(window.setTimeout(() => setMounted(true), 0));
+    return () => scheduledUpdates.forEach((id) => window.clearTimeout(id));
   }, [ticketIdFromUrl]);
 
   if (!mounted) {
@@ -72,19 +98,13 @@ export default function WaitingRoute() {
             Recover Your Virtual Pass
           </h1>
           <p className="mt-2 text-xs sm:text-sm text-soft leading-relaxed">
-            Enter your 6-digit Recovery PIN, Ticket Number (e.g. <span className="font-mono font-bold text-ink">R-040</span>), or phone number to retrieve your live queue position.
+            Enter the ticket number or phone number you used to join, then confirm it with your private recovery PIN.
           </p>
 
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              const val = recoveryInput.trim();
-              if (!val) {
-                setRecoveryError("Please enter your PIN, ticket number, or phone.");
-                return;
-              }
-              setActiveId(val);
-              router.push(`/waiting?ticketId=${encodeURIComponent(val)}`);
+              recoverActiveTicket();
             }}
             className="mt-6 space-y-3"
           >
@@ -95,14 +115,26 @@ export default function WaitingRoute() {
                 setRecoveryInput(e.target.value);
                 setRecoveryError(null);
               }}
-              placeholder="e.g. 151893 or R-040"
+              placeholder="Ticket number or phone"
               className="w-full h-13 px-4 rounded-2xl border border-line-strong bg-white font-mono text-center text-lg font-black text-ink focus:border-forest focus:ring-4 focus:ring-forest/15 outline-none transition uppercase tracking-wider"
+            />
+            <input
+              type="password"
+              inputMode="numeric"
+              value={recoveryPin}
+              onChange={(e) => {
+                setRecoveryPin(e.target.value);
+                setRecoveryError(null);
+              }}
+              placeholder="6-digit recovery PIN"
+              className="w-full h-13 px-4 rounded-2xl border border-line-strong bg-white font-mono text-center text-lg font-black text-ink focus:border-forest focus:ring-4 focus:ring-forest/15 outline-none transition tracking-[0.2em]"
             />
             {recoveryError && (
               <p className="text-xs text-red-600 font-semibold">{recoveryError}</p>
             )}
             <button
               type="submit"
+              disabled={isRecovering}
               className="w-full py-3.5 rounded-2xl bg-forest hover:bg-forest-dark text-white font-extrabold text-xs shadow-md transition cursor-pointer"
             >
               Retrieve Live Virtual Ticket →

@@ -88,6 +88,37 @@ button, a {
   -webkit-tap-highlight-color: transparent;
 }
 
+.nav-primary-action {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: var(--color-mint);
+  padding: 0.625rem 1.125rem;
+  color: var(--color-forest-dark);
+  font-size: 0.875rem;
+  font-weight: 750;
+  transition: background-color 160ms ease, transform 160ms ease;
+}
+
+.nav-primary-action:hover { background: #74f6cc; }
+.nav-primary-action:active { transform: translateY(1px); }
+
+.nav-mobile-link {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  border-radius: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  color: var(--color-ink);
+  font-size: 0.9375rem;
+  font-weight: 650;
+  transition: background-color 160ms ease;
+}
+
+.nav-mobile-link:hover { background: var(--color-surface-sunken); }
+
 :focus-visible {
   outline: 2px solid var(--color-forest);
   outline-offset: 2px;

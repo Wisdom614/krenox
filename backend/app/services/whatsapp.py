@@ -20,9 +20,9 @@ class WhatsAppNotificationService:
         api_key: Optional[str] = None,
         session_id: Optional[str] = None,
     ):
-        self.base_url = (base_url or settings.WA_BASE_URL).rstrip("/")
-        self.api_key = api_key or settings.WA_API_KEY
-        self.session_id = session_id or settings.WA_SESSION_ID
+        self.base_url = (base_url or settings.WA_BASE_URL or "").rstrip("/")
+        self.api_key = api_key or settings.WA_API_KEY or ""
+        self.session_id = session_id or settings.WA_SESSION_ID or ""
 
     def _format_jid(self, phone: str) -> str:
         digits = "".join(filter(str.isdigit, phone))
@@ -84,6 +84,10 @@ class WhatsAppNotificationService:
         return await self.send_text(phone, text)
 
     async def send_text(self, phone: str, text: str) -> bool:
+        if not self.base_url or not self.api_key or not self.session_id:
+            logger.warning("WhatsApp message not sent: gateway environment variables are not configured")
+            return False
+
         jid = self._format_jid(phone)
         url = f"{self.base_url}/api/messages/{self.session_id}/{jid}/send"
         headers = {

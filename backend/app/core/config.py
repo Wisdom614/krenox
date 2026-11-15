@@ -9,10 +9,11 @@ class Settings(BaseSettings):
     SUPABASE_KEY: str
     SUPABASE_ANON_KEY: Optional[str] = None
 
-    # WA-AKG Gateway Settings
-    WA_BASE_URL: str = "https://akg.wisedev.online"
-    WA_API_KEY: str = "wag_HHOZAgSD74TEXvdbutSttNKbJYDCAsMT"
-    WA_SESSION_ID: str = "9p9jve"
+    # WhatsApp gateway settings are optional in local development and must be
+    # supplied through the environment in deployed environments.
+    WA_BASE_URL: Optional[str] = None
+    WA_API_KEY: Optional[str] = None
+    WA_SESSION_ID: Optional[str] = None
 
     # Resend Email Settings
     RESEND_API_KEY: Optional[str] = os.getenv("RESEND_API_KEY", None)
