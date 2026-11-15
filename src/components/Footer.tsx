@@ -15,7 +15,6 @@ export function Footer({ className = "" }: FooterProps) {
           <div>
             <Logo variant="light" size="md" showTagline />
             <p className="mt-5 max-w-sm text-sm leading-6 text-white/65">A configurable queue platform for organisations that need customers, service desks and queue information to stay in step.</p>
-            <p className="mt-5 text-sm text-mint">Built as a B.Tech. Computer Engineering project at the University of Buea.</p>
           </div>
           <div>
             <h2 className="text-sm font-bold text-white">Explore Krenox</h2>

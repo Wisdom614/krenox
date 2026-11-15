@@ -5,6 +5,7 @@ import Link from "next/link";
 import { cancelTicket, fetchTicketStatus, postponeTicket, type ApiQueueStatus } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { Logo } from "@/components/ui";
+import { getTicketPin } from "@/lib/ticket-credentials";
 
 const finishedStates = ["completed", "cancelled", "absent", "skipped"];
 
@@ -38,11 +39,16 @@ export default function WaitingExperience({ ticketId }: { ticketId?: string }) {
   const [busy, setBusy] = useState(false);
   const previousStatus = useRef<string | undefined>(undefined);
   const [generatedAt] = useState(() => Date.now());
+  const ticketPin = ticketId ? getTicketPin(ticketId) : null;
 
   const sync = useCallback(async () => {
-    if (!ticketId) return;
+    if (!ticketId || !ticketPin) {
+      setLoading(false);
+      setError("Enter your recovery PIN to access this ticket.");
+      return;
+    }
     try {
-      const result = await fetchTicketStatus(ticketId);
+      const result = await fetchTicketStatus(ticketId, ticketPin);
       setQueue(result);
       setError("");
       setLoading(false);
@@ -55,7 +61,7 @@ export default function WaitingExperience({ ticketId }: { ticketId?: string }) {
       setIsConnected(false);
       setError(cause instanceof Error ? cause.message : "We could not refresh this ticket.");
     }
-  }, [ticketId]);
+  }, [ticketId, ticketPin]);
 
   useEffect(() => {
     const initialSync = window.setTimeout(() => void sync(), 0);
@@ -65,8 +71,8 @@ export default function WaitingExperience({ ticketId }: { ticketId?: string }) {
   }, [sync, ticketId]);
 
   async function copyPin() {
-    if (!queue) return;
-    await navigator.clipboard?.writeText(queue.ticket.pin);
+    if (!ticketPin) return;
+    await navigator.clipboard?.writeText(ticketPin);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
   }
@@ -74,13 +80,13 @@ export default function WaitingExperience({ ticketId }: { ticketId?: string }) {
   async function leaveQueue() {
     if (!queue || !ticketId || !window.confirm("Leave the queue? Your place will be released.")) return;
     setBusy(true);
-    try { await cancelTicket(ticketId, queue.ticket.pin); await sync(); } finally { setBusy(false); }
+    try { await cancelTicket(ticketId, ticketPin || ""); await sync(); } finally { setBusy(false); }
   }
 
   async function delayQueue() {
     if (!queue || !ticketId || !window.confirm("Let three people pass you?")) return;
     setBusy(true);
-    try { await postponeTicket(ticketId, 3, queue.ticket.pin); await sync(); } finally { setBusy(false); }
+    try { await postponeTicket(ticketId, 3, ticketPin || ""); await sync(); } finally { setBusy(false); }
   }
 
   if (loading) return <main className="grid min-h-screen place-items-center bg-canvas p-6 text-center"><p role="status" className="font-semibold text-ink-muted">Loading your live ticket...</p></main>;
@@ -106,7 +112,7 @@ export default function WaitingExperience({ ticketId }: { ticketId?: string }) {
 
         {!isFinished && <section className="mt-4 rounded-2xl border border-line bg-surface p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-sm font-bold">{ticket.reminder_opt_in ? "WhatsApp alerts are on" : "Browser tracking is on"}</p><p className="mt-0.5 text-xs text-ink-muted">{ticket.reminder_opt_in ? `${ticket.masked_phone || "Your number"} will receive your queue alerts.` : "Keep this page open for live updates."}</p></div><span aria-hidden className={`h-3 w-3 rounded-full ${ticket.reminder_opt_in ? "bg-emerald-600" : "bg-slate-400"}`} /></div></section>}
         {!isFinished && <div className="mt-5 flex flex-wrap gap-3"><button type="button" onClick={delayQueue} disabled={busy || isCalled} className="min-h-11 rounded-xl border border-line px-4 text-sm font-bold text-ink-muted disabled:opacity-40">Need more time?</button><button type="button" onClick={leaveQueue} disabled={busy} className="min-h-11 rounded-xl px-4 text-sm font-bold text-status-danger hover:bg-status-danger-bg disabled:opacity-40">Leave queue</button></div>}
-        <section className="mt-7 border-t border-line pt-5"><button type="button" onClick={() => setDetailsOpen((open) => !open)} className="flex w-full items-center justify-between text-left text-sm font-bold text-forest" aria-expanded={detailsOpen}>Ticket details <span aria-hidden>{detailsOpen ? "−" : "+"}</span></button>{detailsOpen && <div className="mt-4 rounded-2xl bg-surface-sunken p-4"><div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-wider text-ink-subtle">Recovery PIN</p><p className="mt-1 font-mono text-2xl font-bold tracking-widest">{ticket.pin}</p></div><button type="button" onClick={copyPin} className="min-h-11 rounded-xl border border-line bg-surface px-4 text-sm font-bold text-forest">{copied ? "Copied" : "Copy PIN"}</button></div></div>}</section>
+        <section className="mt-7 border-t border-line pt-5"><button type="button" onClick={() => setDetailsOpen((open) => !open)} className="flex w-full items-center justify-between text-left text-sm font-bold text-forest" aria-expanded={detailsOpen}>Ticket details <span aria-hidden>{detailsOpen ? "−" : "+"}</span></button>{detailsOpen && <div className="mt-4 rounded-2xl bg-surface-sunken p-4"><div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-wider text-ink-subtle">Recovery PIN</p><p className="mt-1 font-mono text-2xl font-bold tracking-widest">{ticketPin || "Unavailable"}</p></div><button type="button" onClick={copyPin} className="min-h-11 rounded-xl border border-line bg-surface px-4 text-sm font-bold text-forest">{copied ? "Copied" : "Copy PIN"}</button></div></div>}</section>
       </div>
     </main>
   );

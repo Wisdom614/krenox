@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Logo } from "@/components/ui";
 import { Footer } from "@/components/Footer";
+import { saveTicketPin } from "@/lib/ticket-credentials";
 import WaitingExperience from "@/components/WaitingExperience";
 import {
   fetchPublicTenantQueues,
@@ -101,8 +102,10 @@ export default function TenantQueuePage() {
       });
 
       // Persist active ticket
-      localStorage.setItem("krenox_active_ticket", JSON.stringify(ticket));
-      setActiveTicket(ticket);
+      const { pin, ...publicTicket } = ticket;
+      saveTicketPin(ticket.id, pin);
+      localStorage.setItem("krenox_active_ticket", JSON.stringify(publicTicket));
+      setActiveTicket(publicTicket);
       setSelectedService(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to join queue. Please try again.";

@@ -8,4 +8,5 @@ httpx==0.28.1
 simpy==4.1.1
 numpy==2.2.3
 slowapi==0.1.10
+bcrypt==4.3.0
 

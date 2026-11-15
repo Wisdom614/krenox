@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from app.core.supabase import supabase_client
 from app.core.masking import mask_phone_number
-from app.core.auth import require_role, AuthenticatedUser
+from app.core.auth import require_role, AuthenticatedUser, require_organisation_access, is_super_admin
 from app.services.whatsapp import whatsapp_service
 from app.models.schemas import TransferTicketPayload, RecallTicketPayload
 
@@ -19,6 +19,58 @@ class UpdateTicketStatusPayload(BaseModel):
     ticket_id: str
     status: str
 
+
+def _require_service_access(user: AuthenticatedUser, service_id: str) -> dict:
+    result = (
+        supabase_client.table("services")
+        .select("id, facility_id, facilities(organisation_id)")
+        .eq("id", service_id)
+        .single()
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Service not found")
+    organisation_id = (result.data.get("facilities") or {}).get("organisation_id")
+    if not organisation_id:
+        raise HTTPException(status_code=500, detail="Service has no organisation context")
+    require_organisation_access(user, organisation_id)
+    return result.data
+
+
+def _require_desk_access(user: AuthenticatedUser, desk_id: str) -> dict:
+    result = (
+        supabase_client.table("service_desks")
+        .select("id, facility_id, is_open, name, facilities(organisation_id)")
+        .eq("id", desk_id)
+        .single()
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Desk not found")
+    organisation_id = (result.data.get("facilities") or {}).get("organisation_id")
+    if not organisation_id:
+        raise HTTPException(status_code=500, detail="Desk has no organisation context")
+    require_organisation_access(user, organisation_id)
+    return result.data
+
+
+def _require_ticket_access(user: AuthenticatedUser, ticket_id: str) -> dict:
+    result = (
+        supabase_client.table("tickets")
+        .select("*, services(name, facility_id, facilities(organisation_id))")
+        .eq("id", ticket_id)
+        .single()
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    service = result.data.get("services") or {}
+    organisation_id = (service.get("facilities") or {}).get("organisation_id")
+    if not organisation_id:
+        raise HTTPException(status_code=500, detail="Ticket has no organisation context")
+    require_organisation_access(user, organisation_id)
+    return result.data
+
 @router.get("/queue/{service_id}")
 def get_staff_queue(
     service_id: str,
@@ -28,6 +80,7 @@ def get_staff_queue(
     Returns full live queue state for desk operators with phone numbers MASKED:
     Staff only see: 'Ama N.' and '671 ••• •57', preserving student privacy.
     """
+    _require_service_access(user, service_id)
     serving_res = (
         supabase_client.table("tickets")
         .select("*")
@@ -79,40 +132,25 @@ async def call_next_ticket(
     3. Fires real-time WhatsApp alert to the student's phone with counter destination.
     4. Triggers proximity alerts for upcoming students if they've hit their chosen threshold!
     """
-    next_ticket_res = (
-        supabase_client.table("tickets")
-        .select("*, services(name)")
-        .eq("service_id", payload.service_id)
-        .eq("status", "waiting")
-        .order("joined_at", desc=False)
-        .limit(1)
-        .execute()
-    )
-
-    if not next_ticket_res.data:
+    service = _require_service_access(user, payload.service_id)
+    if not payload.desk_id:
+        raise HTTPException(status_code=400, detail="Select an open desk before calling the next ticket")
+    desk = _require_desk_access(user, payload.desk_id)
+    if desk["facility_id"] != service["facility_id"]:
+        raise HTTPException(status_code=400, detail="Desk does not belong to this service facility")
+    try:
+        called_res = supabase_client.rpc("krenox_call_next", {
+            "p_service_id": payload.service_id,
+            "p_desk_id": payload.desk_id,
+            "p_actor": user.email or payload.desk_name,
+        }).execute()
+    except Exception as error:
+        if "No waiting tickets" in str(error):
+            raise HTTPException(status_code=404, detail="No waiting tickets in this queue") from error
+        raise HTTPException(status_code=500, detail="Unable to call the next ticket. Please retry.") from error
+    if not called_res.data:
         raise HTTPException(status_code=404, detail="No waiting tickets in this queue")
-
-    ticket = next_ticket_res.data[0]
-    now = datetime.utcnow().isoformat()
-
-    update_payload = {"status": "called", "called_at": now}
-    if payload.desk_id:
-        update_payload["service_desk_id"] = payload.desk_id
-
-    update_res = (
-        supabase_client.table("tickets")
-        .update(update_payload)
-        .eq("id", ticket["id"])
-        .execute()
-    )
-
-    supabase_client.table("queue_events").insert({
-        "ticket_id": ticket["id"],
-        "previous_status": "waiting",
-        "new_status": "called",
-        "actor": payload.desk_name,
-        "note": f"Called to {payload.desk_name}"
-    }).execute()
+    ticket = called_res.data[0]
 
     # 1. Alert the person currently called
     if ticket.get("customer_phone") and ticket.get("reminder_opt_in"):
@@ -146,7 +184,7 @@ async def call_next_ticket(
                     people_ahead=people_ahead
                 )
 
-    called_ticket = update_res.data[0] if update_res.data else ticket
+    called_ticket = ticket
     called_ticket["customer_phone"] = mask_phone_number(called_ticket.get("customer_phone"))
 
     return {
@@ -166,6 +204,7 @@ def update_ticket_status(
     if payload.status not in allowed_statuses:
         raise HTTPException(status_code=400, detail=f"Invalid status. Choose from: {allowed_statuses}")
 
+    ticket = _require_ticket_access(user, payload.ticket_id)
     now = datetime.utcnow().isoformat()
     update_fields = {"status": payload.status}
 
@@ -186,6 +225,7 @@ def update_ticket_status(
 
     supabase_client.table("queue_events").insert({
         "ticket_id": payload.ticket_id,
+        "previous_status": ticket["status"],
         "new_status": payload.status,
         "actor": "staff",
         "note": f"Status updated to {payload.status}"
@@ -205,12 +245,25 @@ def get_staff_desks(
     Returns available service counters for the staff console.
     Optionally filtered by facility_id.
     """
+    organisation_id = user.metadata.get("organisation_id")
+    if not organisation_id and not is_super_admin(user):
+        raise HTTPException(status_code=403, detail="Staff account has no organisation assignment")
     query = (
         supabase_client.table("service_desks")
         .select("*, facilities(id, name, organisations(id, name))")
     )
     if facility_id:
+        facility_res = supabase_client.table("facilities").select("organisation_id").eq("id", facility_id).single().execute()
+        if not facility_res.data:
+            raise HTTPException(status_code=404, detail="Facility not found")
+        require_organisation_access(user, facility_res.data["organisation_id"])
         query = query.eq("facility_id", facility_id)
+    elif organisation_id:
+        facilities = supabase_client.table("facilities").select("id").eq("organisation_id", organisation_id).execute()
+        facility_ids = [facility["id"] for facility in (facilities.data or [])]
+        if not facility_ids:
+            return []
+        query = query.in_("facility_id", facility_ids)
     res = query.order("name", desc=False).execute()
     return res.data or []
 
@@ -221,17 +274,9 @@ def toggle_staff_desk(
     user: AuthenticatedUser = Depends(require_role(["staff", "admin"]))
 ):
     """Toggle a counter desk open or closed."""
-    desk_res = (
-        supabase_client.table("service_desks")
-        .select("id, is_open, name")
-        .eq("id", desk_id)
-        .single()
-        .execute()
-    )
-    if not desk_res.data:
-        raise HTTPException(status_code=404, detail="Desk not found")
+    desk_data = _require_desk_access(user, desk_id)
 
-    new_state = not desk_res.data["is_open"]
+    new_state = not desk_data["is_open"]
     upd = (
         supabase_client.table("service_desks")
         .update({"is_open": new_state})
@@ -241,7 +286,7 @@ def toggle_staff_desk(
     return {
         "status": "ok",
         "is_open": new_state,
-        "desk": upd.data[0] if upd.data else desk_res.data,
+        "desk": upd.data[0] if upd.data else desk_data,
     }
 
 
@@ -258,20 +303,11 @@ async def transfer_ticket(
     - If priority == 'urgent', sets joined_at earlier to prioritize at front of line
     - Dispatches WhatsApp notification to customer
     """
-    t_res = (
-        supabase_client.table("tickets")
-        .select("*, services(name)")
-        .eq("id", ticket_id)
-        .single()
-        .execute()
-    )
-    if not t_res.data:
-        raise HTTPException(status_code=404, detail="Ticket not found")
-    t = t_res.data
+    t = _require_ticket_access(user, ticket_id)
 
     target_svc_res = (
         supabase_client.table("services")
-        .select("id, name, prefix, avg_duration_minutes")
+        .select("id, facility_id, name, prefix, avg_duration_minutes")
         .eq("id", payload.target_service_id)
         .single()
         .execute()
@@ -279,6 +315,11 @@ async def transfer_ticket(
     if not target_svc_res.data:
         raise HTTPException(status_code=404, detail="Target service not found")
     target_svc = target_svc_res.data
+    _require_service_access(user, payload.target_service_id)
+    if payload.target_desk_id:
+        target_desk = _require_desk_access(user, payload.target_desk_id)
+        if target_desk["facility_id"] != target_svc.get("facility_id"):
+            raise HTTPException(status_code=400, detail="Target desk does not belong to target service facility")
 
     old_svc_name = t.get("services", {}).get("name", "Previous Service")
     new_svc_name = target_svc["name"]
@@ -349,16 +390,7 @@ async def recall_ticket(
     """
     Recalls an absent or skipped ticket back to active 'called' status at the specified desk.
     """
-    t_res = (
-        supabase_client.table("tickets")
-        .select("*, services(name)")
-        .eq("id", ticket_id)
-        .single()
-        .execute()
-    )
-    if not t_res.data:
-        raise HTTPException(status_code=404, detail="Ticket not found")
-    t = t_res.data
+    t = _require_ticket_access(user, ticket_id)
 
     now = datetime.utcnow().isoformat()
     upd = (

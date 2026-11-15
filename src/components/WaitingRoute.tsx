@@ -6,6 +6,7 @@ import Link from "next/link";
 import WaitingExperience from "@/components/WaitingExperience";
 import { Logo } from "@/components/ui";
 import { recoverTicket } from "@/lib/api";
+import { saveTicketPin } from "@/lib/ticket-credentials";
 
 export default function WaitingRoute() {
   const searchParams = useSearchParams();
@@ -31,6 +32,7 @@ export default function WaitingRoute() {
     setRecoveryError(null);
     try {
       const recovered = await recoverTicket(reference, pin);
+      saveTicketPin(recovered.ticket_id, pin);
       setActiveId(recovered.ticket_id);
       router.push(recovered.redirect_url);
     } catch (error: unknown) {

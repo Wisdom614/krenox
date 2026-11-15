@@ -16,7 +16,8 @@ from app.models.schemas import (
     CreateTenantDeskPayload,
 )
 from app.services.organisations import org_workflow_service
-from app.core.auth import require_role, AuthenticatedUser
+from app.core.auth import require_role, require_super_admin, AuthenticatedUser
+from app.core.supabase import supabase_client
 
 router = APIRouter(prefix="/organisations", tags=["organisations"])
 
@@ -90,7 +91,7 @@ async def complete_account_setup(payload: SetupAccountPayload):
 
 @router.get("/admin/applications", response_model=List[OrganisationApplicationResponse])
 def list_applications_for_admin(
-    user: AuthenticatedUser = Depends(require_role(["admin"]))
+    user: AuthenticatedUser = Depends(require_super_admin)
 ):
     """
     System Administrator dashboard: View all organisation applications and their approval status.
@@ -101,7 +102,7 @@ def list_applications_for_admin(
 async def review_organisation(
     org_id: str,
     payload: AdminReviewPayload,
-    user: AuthenticatedUser = Depends(require_role(["admin"]))
+    user: AuthenticatedUser = Depends(require_super_admin)
 ):
     """
     System Administrator review: Approve, Reject, Request Additional Info, or Suspend an organisation.
@@ -117,7 +118,7 @@ async def review_organisation(
 @router.post("/admin/{org_id}/regenerate-setup-token")
 def regenerate_setup_token(
     org_id: str,
-    user: AuthenticatedUser = Depends(require_role(["admin"]))
+    user: AuthenticatedUser = Depends(require_super_admin)
 ):
     """
     System Administrator: Regenerates a fresh account setup token and link for an approved organisation.
@@ -127,7 +128,7 @@ def regenerate_setup_token(
 @router.get("/admin/audit-trail", response_model=List[OrganisationAuditLogEntry])
 def get_audit_trail(
     ref: Optional[str] = None,
-    user: AuthenticatedUser = Depends(require_role(["admin"]))
+    user: AuthenticatedUser = Depends(require_super_admin)
 ):
     """
     Tamper-evident audit trail of all organisation onboarding & governance actions.

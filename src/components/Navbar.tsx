@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/ui";
@@ -68,14 +69,14 @@ export function Navbar({ onTakeTicket, theme = "light", className = "", activeTe
         </div>
       </header>
 
-      {mobileMenuOpen && <div id={menuId} className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
+      {mobileMenuOpen && typeof document !== "undefined" && createPortal(<div id={menuId} className="fixed inset-0 z-[100] lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
         <button type="button" className="absolute inset-0 h-full w-full cursor-default bg-ink/65 backdrop-blur-sm" aria-label="Close navigation" onClick={closeMenu} />
         <div className="relative mx-auto mt-3 max-h-[calc(100dvh-1.5rem)] w-[calc(100%-1.5rem)] max-w-lg overflow-y-auto rounded-3xl border border-line bg-surface p-5 text-ink shadow-elevated">
           <div className="flex items-center justify-between border-b border-line pb-4"><Logo href="/" variant="dark" size="md" showTagline /><button type="button" onClick={closeMenu} className="grid h-11 w-11 place-items-center rounded-xl text-ink-muted transition hover:bg-surface-sunken hover:text-ink" aria-label="Close navigation"><svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18 18 6M6 6l12 12" /></svg></button></div>
           <nav aria-label="Mobile navigation" className="mt-5 space-y-1"><Link href="/" onClick={closeMenu} className="nav-mobile-link">Platform home</Link><Link href="/#platform" onClick={closeMenu} className="nav-mobile-link">How Krenox works</Link><Link href="/#directory" onClick={closeMenu} className="nav-mobile-link">Find an organisation</Link><Link href="/#simulation" onClick={closeMenu} className="nav-mobile-link">Simulation workspace</Link><div className="my-4 border-t border-line" /><Link href={user ? dashboardRoute : "/login"} onClick={closeMenu} className="nav-mobile-link">{user ? "Open your console" : "Staff and admin sign in"}</Link><Link href="/register-organisation/status" onClick={closeMenu} className="nav-mobile-link">Track an application</Link></nav>
           <div className="mt-6">{onTakeTicket ? <button type="button" onClick={() => { closeMenu(); onTakeTicket(); }} className="nav-primary-action w-full">Take a ticket</button> : <Link href="/register-organisation" onClick={closeMenu} className="nav-primary-action flex w-full">Register organisation</Link>}</div>
         </div>
-      </div>}
+      </div>, document.body)}
     </>
   );
 }

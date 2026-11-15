@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button, Eyebrow, Modal } from "@/components/ui";
 import { desksLabel, getService, isValidPhone, organisation, saveTicket, services } from "@/lib/queue";
 import { fetchServices, joinBackendQueue, sendWhatsAppOtp, verifyWhatsAppOtp } from "@/lib/api";
+import { saveTicketPin } from "@/lib/ticket-credentials";
 
 type Props = { initialServiceId: string; onClose: () => void };
 
@@ -155,6 +156,7 @@ export default function JoinQueueDialog({ initialServiceId, onClose }: Props) {
         reminder,
         joinedAt: new Date(registered.joined_at).getTime(),
       });
+      saveTicketPin(registered.id, registered.pin);
 
       router.push(`/waiting?ticketId=${registered.id}`);
     } catch (err: unknown) {

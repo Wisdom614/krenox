@@ -648,7 +648,7 @@ export default function StaffPage() {
                             Transfer
                           </button>
                           <span className="text-xs font-mono font-medium text-ink-muted bg-surface-sunken px-2.5 py-1 rounded-lg border border-line">
-                            PIN: {t.pin}
+                            Customer access is protected by a private recovery PIN.
                           </span>
                         </div>
                       </div>

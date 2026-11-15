@@ -20,10 +20,18 @@ class Settings(BaseSettings):
     RESEND_FROM_EMAIL: str = os.getenv("RESEND_FROM_EMAIL", "Krenox <verify@wisedev.online>")
 
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "https://krenox.vercel.app")
+    # Comma-separated exact origins. Never use a wildcard with credentials.
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,https://krenox.vercel.app")
     PORT: int = 8000
 
     class Config:
         env_file = ENV_PATH if os.path.exists(ENV_PATH) else ".env"
         extra = "ignore"
+
+    @property
+    def cors_origins(self) -> list[str]:
+        origins = {origin.strip().rstrip("/") for origin in self.CORS_ORIGINS.split(",") if origin.strip()}
+        origins.add(self.FRONTEND_URL.strip().rstrip("/"))
+        return sorted(origins)
 
 settings = Settings()

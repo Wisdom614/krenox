@@ -5,6 +5,7 @@
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- 1. ORGANISATIONS
 CREATE TABLE IF NOT EXISTS public.organisations (
@@ -58,10 +59,11 @@ CREATE TABLE IF NOT EXISTS public.tickets (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     service_id UUID NOT NULL REFERENCES public.services(id) ON DELETE CASCADE,
     ticket_number TEXT NOT NULL,
-    pin TEXT NOT NULL,
+    pin_hash TEXT NOT NULL,
     customer_name TEXT NOT NULL,
     customer_phone TEXT,
     reminder_opt_in BOOLEAN DEFAULT TRUE,
+    notify_threshold INT NOT NULL DEFAULT 2 CHECK (notify_threshold BETWEEN 1 AND 10),
     status public.ticket_status DEFAULT 'waiting',
     service_desk_id UUID REFERENCES public.service_desks(id) ON DELETE SET NULL,
     joined_at TIMESTAMPTZ DEFAULT NOW(),
@@ -83,7 +85,8 @@ CREATE TABLE IF NOT EXISTS public.queue_events (
 
 -- Indices for rapid queue queries
 CREATE INDEX IF NOT EXISTS idx_tickets_service_status ON public.tickets(service_id, status);
-CREATE INDEX IF NOT EXISTS idx_tickets_pin ON public.tickets(pin);
+CREATE INDEX IF NOT EXISTS idx_tickets_active_phone ON public.tickets(customer_phone)
+    WHERE customer_phone IS NOT NULL AND status IN ('waiting', 'called', 'serving');
 
 -- ====================================================================
 -- SEED INITIAL DEMO DATA (University of Buea)
@@ -136,11 +139,11 @@ BEGIN
         RETURNING id INTO svc_advising;
 
         -- Seed initial waiting tickets for live demonstration
-        INSERT INTO public.tickets (service_id, ticket_number, pin, customer_name, customer_phone, status, joined_at)
+        INSERT INTO public.tickets (service_id, ticket_number, pin_hash, customer_name, customer_phone, status, joined_at)
         VALUES 
-            (svc_records, 'R-038', '112233', 'John E.', '+237670000001', 'serving', NOW() - INTERVAL '10 minutes'),
-            (svc_records, 'R-039', '223344', 'Marie A.', '+237670000002', 'waiting', NOW() - INTERVAL '8 minutes'),
-            (svc_records, 'R-040', '334455', 'Emmanuel T.', '+237670000003', 'waiting', NOW() - INTERVAL '5 minutes');
+            (svc_records, 'R-038', crypt('112233', gen_salt('bf', 12)), 'John E.', '+237670000001', 'serving', NOW() - INTERVAL '10 minutes'),
+            (svc_records, 'R-039', crypt('223344', gen_salt('bf', 12)), 'Marie A.', '+237670000002', 'waiting', NOW() - INTERVAL '8 minutes'),
+            (svc_records, 'R-040', crypt('334455', gen_salt('bf', 12)), 'Emmanuel T.', '+237670000003', 'waiting', NOW() - INTERVAL '5 minutes');
 
     END IF;
 END $$;

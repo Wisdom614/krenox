@@ -54,7 +54,6 @@ export type ApiTicket = {
   id: string;
   service_id: string;
   ticket_number: string;
-  pin: string;
   customer_name: string;
   customer_phone?: string;
   masked_phone?: string;
@@ -72,6 +71,8 @@ export type ApiTicket = {
   service_name?: string;
   desk_name?: string;
 };
+
+export type CreatedApiTicket = ApiTicket & { pin: string };
 
 export type ApiQueueStatus = {
   ticket: ApiTicket;
@@ -182,7 +183,7 @@ export async function joinBackendQueue(payload: {
   customer_phone?: string;
   reminder_opt_in: boolean;
   notify_threshold?: number;
-}): Promise<ApiTicket> {
+}): Promise<CreatedApiTicket> {
   const res = await fetch(`${getApiBase()}/queues/join`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -195,8 +196,11 @@ export async function joinBackendQueue(payload: {
   return await res.json();
 }
 
-export async function fetchTicketStatus(ticketId: string): Promise<ApiQueueStatus> {
-  const res = await fetch(`${getApiBase()}/queues/ticket/${ticketId}`, { cache: "no-store" });
+export async function fetchTicketStatus(ticketId: string, pin: string): Promise<ApiQueueStatus> {
+  const res = await fetch(`${getApiBase()}/queues/ticket/${ticketId}`, {
+    cache: "no-store",
+    headers: { "X-Ticket-PIN": pin },
+  });
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || "Failed to load live ticket status");

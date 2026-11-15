@@ -12,6 +12,26 @@ class AuthenticatedUser:
         self.role = role
         self.metadata = metadata
 
+
+def is_super_admin(user: AuthenticatedUser) -> bool:
+    """Only a platform administrator without a tenant context is global."""
+    return user.role == "super_admin" or (
+        user.role == "admin" and not user.metadata.get("organisation_id")
+    )
+
+
+def require_organisation_access(user: AuthenticatedUser, organisation_id: str) -> None:
+    """Enforce tenant ownership for every resource-level operation."""
+    if is_super_admin(user):
+        return
+    user_org_id = user.metadata.get("organisation_id")
+    if not user_org_id or user_org_id != organisation_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied for this organisation.",
+        )
+
+
 def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> AuthenticatedUser:
@@ -76,3 +96,9 @@ def require_role(allowed_roles: List[str]):
             )
         return user
     return role_checker
+
+
+def require_super_admin(user: AuthenticatedUser = Depends(get_current_user)) -> AuthenticatedUser:
+    if not is_super_admin(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Platform administrator access is required.")
+    return user

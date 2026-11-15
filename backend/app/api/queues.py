@@ -1,7 +1,7 @@
 import random
 import re
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Header
 from pydantic import BaseModel
 from typing import Optional
 from app.core.supabase import supabase_client
@@ -9,7 +9,7 @@ from app.core.security import limiter
 from app.core.masking import mask_phone_number
 from app.models.schemas import (
     JoinQueueRequest,
-    TicketResponse,
+    TicketResponse, TicketCreatedResponse,
     QueueStatusResponse,
     CancelTicketPayload,
     PostponeTicketPayload,
@@ -17,6 +17,7 @@ from app.models.schemas import (
 )
 from app.services.whatsapp import whatsapp_service
 from app.services.organisations import org_workflow_service
+from app.core.ticket_security import verify_ticket_pin
 
 router = APIRouter(prefix="/queues", tags=["queues"])
 
@@ -68,7 +69,7 @@ def list_services():
     response = supabase_client.table("services").select("*, facilities(*, organisations(*))").execute()
     return response.data
 
-@router.post("/join", response_model=TicketResponse)
+@router.post("/join", response_model=TicketCreatedResponse)
 async def join_queue(req: JoinQueueRequest):
     """
     Customer joins a queue:
@@ -112,29 +113,20 @@ async def join_queue(req: JoinQueueRequest):
             detail="This organisation is currently pending administrative review and cannot issue live tickets."
         )
     
-    # Calculate daily sequential ticket number
-    count_today = (
-        supabase_client.table("tickets")
-        .select("id", count="exact")
-        .eq("service_id", req.service_id)
-        .gte("joined_at", datetime.utcnow().strftime("%Y-%m-%d 00:00:00"))
-        .execute()
-    )
-    next_idx = (count_today.count or 0) + 40
-    ticket_num = f"{prefix}-{next_idx:03d}"
     pin = f"{random.randint(100000, 999999)}"
-
-    ticket_data = {
-        "service_id": req.service_id,
-        "ticket_number": ticket_num,
-        "pin": pin,
-        "customer_name": req.customer_name,
-        "customer_phone": clean_phone,
-        "reminder_opt_in": req.reminder_opt_in,
-        "status": "waiting"
-    }
-
-    insert_res = supabase_client.table("tickets").insert(ticket_data).execute()
+    try:
+        insert_res = supabase_client.rpc("krenox_join_queue", {
+            "p_service_id": req.service_id,
+            "p_customer_name": req.customer_name.strip(),
+            "p_customer_phone": clean_phone,
+            "p_reminder_opt_in": req.reminder_opt_in,
+            "p_notify_threshold": req.notify_threshold,
+            "p_pin": pin,
+        }).execute()
+    except Exception as error:
+        if "tickets_one_active_phone_unique" in str(error):
+            raise HTTPException(status_code=400, detail="You already hold an active ticket. Complete or cancel it before taking another.")
+        raise HTTPException(status_code=500, detail="Unable to issue a ticket. Please retry.") from error
     if not insert_res.data:
         raise HTTPException(status_code=500, detail="Failed to register ticket")
 
@@ -156,7 +148,7 @@ async def join_queue(req: JoinQueueRequest):
     if req.reminder_opt_in and clean_phone:
         await whatsapp_service.send_ticket_confirmation(
             phone=clean_phone,
-            ticket_number=ticket_num,
+            ticket_number=created["ticket_number"],
             service_name=svc["name"],
             position=position,
             est_wait=est_wait,
@@ -164,11 +156,11 @@ async def join_queue(req: JoinQueueRequest):
             notify_threshold=req.notify_threshold
         )
 
-    return TicketResponse(
+    return TicketCreatedResponse(
         id=created["id"],
         service_id=created["service_id"],
         ticket_number=created["ticket_number"],
-        pin=created["pin"],
+        pin=pin,
         customer_name=created["customer_name"],
         masked_phone=mask_phone_number(clean_phone),
         status=created["status"],
@@ -179,10 +171,10 @@ async def join_queue(req: JoinQueueRequest):
     )
 
 @router.get("/ticket/{ticket_id}", response_model=QueueStatusResponse)
-def get_ticket_status(ticket_id: str):
+def get_ticket_status(ticket_id: str, x_ticket_pin: str = Header(...)):
     """
-    Fetch live ticket status with multi-tenant organisation and facility details.
-    Supports lookup by UUID ticket ID, 6-digit Recovery PIN, ticket number (e.g. R-040), or customer phone number.
+    Fetch one ticket's public status. The ticket UUID and recovery PIN form a
+    capability pair; neither ticket numbers nor phone numbers are accepted.
     """
     clean_id = ticket_id.strip()
 
@@ -198,51 +190,11 @@ def get_ticket_status(ticket_id: str):
         "*, services(*, facilities(*, organisations(*))), service_desks(name)"
     )
 
-    t = None
-    if is_uuid:
-        res = query.eq("id", clean_id).execute()
-        if res.data:
-            t = res.data[0]
-
-    if not t:
-        clean_phone = normalize_phone(clean_id) if any(c.isdigit() for c in clean_id) else None
-
-        # 1. Recovery PIN lookup (4-8 digits)
-        if clean_id.isdigit() and len(clean_id) in [4, 5, 6, 7, 8]:
-            res = (
-                query.eq("pin", clean_id)
-                .in_("status", ["waiting", "called", "serving"])
-                .order("joined_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-            if res.data:
-                t = res.data[0]
-
-        # 2. Ticket Number lookup (e.g. R-040, T-090)
-        if not t:
-            res = (
-                query.ilike("ticket_number", clean_id)
-                .order("joined_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-            if res.data:
-                t = res.data[0]
-
-        # 3. Customer Phone lookup
-        if not t and clean_phone and len(clean_phone) >= 8:
-            res = (
-                query.eq("customer_phone", clean_phone)
-                .in_("status", ["waiting", "called", "serving"])
-                .order("joined_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-            if res.data:
-                t = res.data[0]
-
-    if not t:
+    if not is_uuid:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    res = query.eq("id", clean_id).execute()
+    t = res.data[0] if res.data else None
+    if not t or not verify_ticket_pin(x_ticket_pin.strip(), t.get("pin_hash")):
         raise HTTPException(status_code=404, detail="Ticket not found")
     ahead_res = (
         supabase_client.table("tickets")
@@ -277,7 +229,6 @@ def get_ticket_status(ticket_id: str):
             id=t["id"],
             service_id=t["service_id"],
             ticket_number=t["ticket_number"],
-            pin=t["pin"],
             customer_name=t["customer_name"],
             masked_phone=mask_phone_number(t.get("customer_phone")),
             reminder_opt_in=t.get("reminder_opt_in", False),
@@ -324,7 +275,7 @@ async def cancel_ticket(ticket_id: str, payload: CancelTicketPayload):
             "ticket": t,
         }
 
-    if payload.pin and payload.pin.strip() != t.get("pin"):
+    if not verify_ticket_pin(payload.pin.strip(), t.get("pin_hash")):
         raise HTTPException(status_code=403, detail="Invalid verification PIN for this ticket")
 
     now = datetime.utcnow().isoformat()
@@ -375,7 +326,7 @@ def postpone_ticket(ticket_id: str, payload: PostponeTicketPayload):
     if t["status"] != "waiting":
         raise HTTPException(status_code=400, detail="Only waiting tickets can be postponed")
 
-    if payload.pin and payload.pin.strip() != t.get("pin"):
+    if not verify_ticket_pin(payload.pin.strip(), t.get("pin_hash")):
         raise HTTPException(status_code=403, detail="Invalid verification PIN for this ticket")
 
     behind_res = (
@@ -431,8 +382,7 @@ def recover_ticket(payload: RecoverTicketPayload):
 
     query = (
         supabase_client.table("tickets")
-        .select("id, ticket_number, pin, status, service_id, services(name, facilities(name, organisations(name)))")
-        .eq("pin", payload.pin.strip())
+        .select("id, ticket_number, pin_hash, status, service_id, services(name, facilities(name, organisations(name)))")
     )
 
     if clean_phone and len(clean_phone) >= 8:
@@ -447,13 +397,13 @@ def recover_ticket(payload: RecoverTicketPayload):
         .execute()
     )
 
-    if not res.data:
+    matched = next((ticket for ticket in (res.data or []) if verify_ticket_pin(payload.pin.strip(), ticket.get("pin_hash"))), None)
+    if not matched:
         raise HTTPException(
             status_code=404,
             detail="No active ticket found matching these credentials. Please check your phone/ticket number and PIN.",
         )
 
-    matched = res.data[0]
     return {
         "status": "ok",
         "ticket_id": matched["id"],

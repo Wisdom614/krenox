@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Logo } from "@/components/ui";
 import { registerOrganisation, verifyOrganisationContact, resendOrganisationCode } from "@/lib/api";
 
@@ -17,8 +16,6 @@ const CATEGORIES = [
 ];
 
 export default function RegisterOrganisationPage() {
-  const router = useRouter();
-
   // Step state: 1 = Form, 2 = Verify Code, 3 = Confirmation
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
@@ -185,10 +182,10 @@ export default function RegisterOrganisationPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f7f9f8] text-ink selection:bg-mint selection:text-forest-dark">
+    <main className="min-h-screen bg-canvas text-ink selection:bg-mint selection:text-forest-dark">
       {/* ── Top Header ── */}
       <header className="border-b border-line bg-white/90 backdrop-blur sticky top-0 z-30">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 sm:px-8 py-3.5 sm:py-4">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4 sm:px-8">
           <Logo size="md" variant="dark" />
           <div className="flex items-center gap-3 sm:gap-6">
             <Link
@@ -211,30 +208,30 @@ export default function RegisterOrganisationPage() {
       </header>
 
       {/* ── Main Content Container ── */}
-      <div className="mx-auto max-w-7xl px-4 sm:px-8 py-8 sm:py-14">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-14 items-start">
+      <div className="mx-auto max-w-6xl px-5 py-9 sm:px-8 sm:py-14">
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12 lg:gap-12">
           
           {/* ─────────────────────────────────────────────────────────────
               LEFT PANEL: INSTITUTIONAL CONTEXT & ASSURANCES (DESKTOP)
           ───────────────────────────────────────────────────────────── */}
-          <aside className="lg:col-span-5 space-y-6 lg:sticky lg:top-24">
-            <div>
-              <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-forest mb-2">
-                <span className="w-2 h-2 rounded-full bg-forest" />
-                <span>Institutional Onboarding</span>
+          <aside className="space-y-5 lg:col-span-5 lg:sticky lg:top-24">
+            <div className="rounded-[2rem] bg-forest p-7 text-white sm:p-9">
+              <div className="inline-flex items-center gap-2 text-sm font-semibold text-mint">
+                <span className="h-2 w-2 rounded-full bg-mint" />
+                <span>Organisation onboarding</span>
               </div>
-              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight text-ink leading-[1.15]">
-                Deploy Digital Queues in Your Facility
+              <h1 className="mt-5 max-w-md font-display text-3xl font-bold leading-[1.05] tracking-tight text-balance sm:text-4xl">
+                Set up the queue your organisation needs.
               </h1>
-              <p className="mt-3 text-xs sm:text-sm text-soft leading-relaxed">
-                Connect your service counters to Krenox. Allow students, patients, and visitors to join virtual queues from their smartphones and wait comfortably outside.
+              <p className="mt-5 max-w-md text-sm leading-6 text-white/75">
+                Start with your organisation details. Verify your contact, then we review your application before you configure facilities and services.
               </p>
             </div>
 
             {/* Stepper (Responsive) */}
-            <div className="bg-white rounded-2xl p-4 sm:p-5 border border-line shadow-xs">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-soft block mb-3">
-                Onboarding Progress
+            <div className="rounded-3xl border border-line bg-surface p-5 shadow-subtle sm:p-6">
+              <span className="block text-sm font-bold text-ink mb-4">
+                Your application progress
               </span>
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
@@ -247,7 +244,7 @@ export default function RegisterOrganisationPage() {
                     <h4 className={`text-xs font-bold ${step === 1 ? "text-forest" : "text-ink"}`}>
                       Organisation Details
                     </h4>
-                    <p className="text-[11px] text-soft">Institution profile & branch city</p>
+                    <p className="text-xs text-soft">Organisation profile and location</p>
                   </div>
                 </div>
 
@@ -261,7 +258,7 @@ export default function RegisterOrganisationPage() {
                     <h4 className={`text-xs font-bold ${step === 2 ? "text-forest" : "text-ink"}`}>
                       Contact Verification
                     </h4>
-                    <p className="text-[11px] text-soft">Single-use WhatsApp or Email OTP</p>
+                    <p className="text-xs text-soft">Confirm your email or WhatsApp contact</p>
                   </div>
                 </div>
 
@@ -275,52 +272,52 @@ export default function RegisterOrganisationPage() {
                     <h4 className={`text-xs font-bold ${step === 3 ? "text-forest" : "text-ink"}`}>
                       Administrative Review
                     </h4>
-                    <p className="text-[11px] text-soft">Approval & instant entrance poster</p>
+                    <p className="text-xs text-soft">We review and activate your organisation</p>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* 3 Core Assurances */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 gap-3">
-              <div className="bg-white/80 rounded-2xl p-4 border border-line flex items-start gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <div className="rounded-2xl border border-line bg-surface p-4 flex items-start gap-3">
                 <div className="w-8 h-8 rounded-xl bg-mint text-forest flex items-center justify-center shrink-0">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-ink">1-Hour Review Window</h4>
+                  <h4 className="text-xs font-bold text-ink">Review status you can track</h4>
                   <p className="text-[11px] text-soft mt-0.5">
-                    Applications are validated by the platform team within 60 minutes.
+                    Keep your reference number to check each stage of your application.
                   </p>
                 </div>
               </div>
 
-              <div className="bg-white/80 rounded-2xl p-4 border border-line flex items-start gap-3">
+              <div className="rounded-2xl border border-line bg-surface p-4 flex items-start gap-3">
                 <div className="w-8 h-8 rounded-xl bg-mint text-forest flex items-center justify-center shrink-0">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                   </svg>
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-ink">Instant Printable Poster</h4>
+                  <h4 className="text-xs font-bold text-ink">Built around your operation</h4>
                   <p className="text-[11px] text-soft mt-0.5">
-                    Receive your high-res A4 QR poster directly to your WhatsApp DM on approval.
+                    Add the facilities, desks and service lines your customers actually use.
                   </p>
                 </div>
               </div>
 
-              <div className="bg-white/80 rounded-2xl p-4 border border-line flex items-start gap-3">
+              <div className="rounded-2xl border border-line bg-surface p-4 flex items-start gap-3">
                 <div className="w-8 h-8 rounded-xl bg-mint text-forest flex items-center justify-center shrink-0">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                   </svg>
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-ink">Strict Data Privacy</h4>
+                  <h4 className="text-xs font-bold text-ink">Verification comes first</h4>
                   <p className="text-[11px] text-soft mt-0.5">
-                    Phone numbers are protected with enterprise zero-retention masking.
+                    We confirm your nominated contact before sending your application for review.
                   </p>
                 </div>
               </div>
@@ -334,13 +331,14 @@ export default function RegisterOrganisationPage() {
 
             {/* ── STEP 1: FORM ── */}
             {step === 1 && (
-              <div className="bg-white rounded-3xl p-6 sm:p-10 border border-line shadow-md">
+              <div className="rounded-[2rem] border border-line bg-surface p-6 shadow-card sm:p-10">
                 <div className="mb-6">
-                  <h2 className="text-xl sm:text-2xl font-extrabold text-ink tracking-tight">
-                    Register Your Organisation
+                  <p className="text-sm font-bold text-forest">Step 1 of 3</p>
+                  <h2 className="mt-2 text-2xl sm:text-3xl font-extrabold text-ink tracking-tight">
+                    Tell us about your organisation
                   </h2>
                   <p className="mt-1 text-xs sm:text-sm text-soft leading-relaxed">
-                    Provide your institution details below. Once verified, you will receive administrator credentials and entrance posters.
+                    We only need enough information to identify your organisation and confirm the right contact person.
                   </p>
                 </div>
 

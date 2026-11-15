@@ -13,7 +13,6 @@ class TicketResponse(BaseModel):
     id: str
     service_id: str
     ticket_number: str
-    pin: str
     customer_name: str
     masked_phone: Optional[str] = None
     reminder_opt_in: bool = False
@@ -26,6 +25,11 @@ class TicketResponse(BaseModel):
     facility_name: Optional[str] = None
     organisation_name: Optional[str] = None
     desk_name: Optional[str] = None
+
+
+class TicketCreatedResponse(TicketResponse):
+    """The recovery PIN is deliberately present only in this one-time response."""
+    pin: str
 
 class QueueStatusResponse(BaseModel):
     ticket: TicketResponse
@@ -102,16 +106,16 @@ class SetupAccountPayload(BaseModel):
 # ── Customer & Staff Lifecycle Operations ──
 
 class CancelTicketPayload(BaseModel):
-    pin: Optional[str] = None
+    pin: str = Field(min_length=6, max_length=6)
     reason: Optional[str] = None
 
 class PostponeTicketPayload(BaseModel):
     positions: int = Field(default=3, ge=1, le=10, description="Number of spots to push back")
-    pin: Optional[str] = None
+    pin: str = Field(min_length=6, max_length=6)
 
 class RecoverTicketPayload(BaseModel):
     phone_or_ticket: str = Field(description="Customer phone number or ticket number")
-    pin: str = Field(min_length=4, max_length=10)
+    pin: str = Field(min_length=6, max_length=6)
 
 class TransferTicketPayload(BaseModel):
     target_service_id: str
