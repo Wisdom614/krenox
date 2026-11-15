@@ -449,7 +449,10 @@ class OrganisationWorkflowService:
                 supabase_client.table("organisations").upsert({
                     "id": target["id"],
                     "name": target["name"],
-                    "slug": target["slug"]
+                    "slug": target["slug"],
+                    "status": "APPROVED",
+                    "reviewed_at": target["reviewed_at"],
+                    "reviewed_by": actor,
                 }).execute()
 
                 supabase_client.table("facilities").upsert({
@@ -745,15 +748,30 @@ class OrganisationWorkflowService:
     def is_organisation_approved(self, org_id: Optional[str] = None, slug: Optional[str] = None) -> bool:
         """
         CRITICAL ACCESS CONTROL GATE:
-        Returns True ONLY if organisation exists and has status == 'APPROVED'.
+        The live Supabase organisation is authoritative for ticket issuance.
+        The local workflow store is retained as a fallback for an application
+        that has not yet been provisioned in Supabase.
         """
         apps = self._read_apps()
+        try:
+            query = supabase_client.table("organisations").select("status")
+            if org_id:
+                response = query.eq("id", org_id).limit(1).execute()
+            elif slug:
+                response = query.eq("slug", slug).limit(1).execute()
+            else:
+                return False
+
+            if response.data:
+                return response.data[0].get("status") == "APPROVED"
+        except Exception:
+            # During initial provisioning, fall back to the workflow store.
+            pass
+
         if org_id and org_id in apps:
             return apps[org_id].get("status") == "APPROVED"
         if slug:
-            for item in apps.values():
-                if item.get("slug") == slug:
-                    return item.get("status") == "APPROVED"
+            return any(item.get("slug") == slug and item.get("status") == "APPROVED" for item in apps.values())
         return False
 
     def get_public_directory(self) -> List[Dict[str, Any]]:
